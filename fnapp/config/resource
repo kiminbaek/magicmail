@@ -1,0 +1,28 @@
+{
+    "data-share":
+    {
+        "shares":
+        [
+            {
+                "name": "magicmail/data",
+                "permission":
+                {
+                    "rw":
+                    [
+                        "magicmail"
+                    ]
+                }
+            },
+            {
+                "name": "magicmail",
+                "permission":
+                {
+                    "rw":
+                    [
+                        "magicmail"
+                    ]
+                }
+            }
+        ]
+    }
+}

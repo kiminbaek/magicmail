@@ -1,0 +1,39 @@
+# 依赖目录
+node_modules
+web/node_modules
+
+# 构建产物（Docker 内重建）
+bin/
+server/embedfs/dist
+web/dist
+server/dist
+
+# IDE / 开发工具
+.git
+.gitignore
+.codebuddy
+*.md
+!README.md
+
+# 开发脚本（非运行时需要）
+dev.sh
+build.sh
+deploy.sh
+version.js
+skills-lock.json
+
+# fnOS 应用包
+fnapp/
+
+# Docker 自身
+Dockerfile
+.dockerignore
+docker-compose*
+
+# OS 文件
+.DS_Store
+Thumbs.db
+
+# 测试/临时文件
+*.log
+*.tmp

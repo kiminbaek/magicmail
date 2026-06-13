@@ -1,0 +1,394 @@
+#!/bin/bash
+
+# ============================================================
+# Magicmail 飞牛 fnOS 应用启停脚本 (DEBUG 增强版)
+# ============================================================
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+DIAG_FILE="${TRIM_PKGVAR}/diag.log"
+
+# [DEBUG] 立即写入启动日志 - 确认脚本被执行
+echo "========== SCRIPT ENTRY ==========" >> "${LOG_FILE}" 2>/dev/null
+echo "TIMESTAMP: $(date '+%Y-%m-%d %H:%M:%S')" >> "${LOG_FILE}" 2>/dev/null
+echo "ARGUMENT: $1" >> "${LOG_FILE}" 2>/dev/null
+echo "CALLER: $(ps -o comm= -p $PPID 2>/dev/null || echo unknown)" >> "${LOG_FILE}" 2>/dev/null
+
+# 数据目录（飞牛数据共享路径的第一个）
+DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+
+# Go 二进制文件路径
+APP_BIN="${TRIM_APPDEST}/server/magicmail"
+
+# 服务端口（从 wizard 获取，为空时兜底 8080）
+PORT="${wizard_app_port}"
+[ -z "${PORT}" ] && PORT=23232
+
+# 数据库路径
+DB_PATH="${DATA_DIR}/magicmail.db"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "${LOG_FILE}"
+}
+
+# ============================================================
+# 诊断函数 — 记录环境信息到 diag.log（详细版）
+# ============================================================
+diag() {
+    {
+        echo "========== $(date '+%Y-%m-%d %H:%M:%S') =========="
+        echo "ACTION: $1"
+        echo ""
+        echo "--- [DEBUG] 脚本基本信息 ---"
+        echo "SCRIPT_PATH: $0"
+        echo "SCRIPT_ARGS: $*"
+        echo "CURRENT_USER: $(whoami)"
+        echo "CURRENT_DIR: $(pwd)"
+        echo ""
+        echo "--- [DEBUG] 完整环境变量 ---"
+        env 2>/dev/null | sort || echo "(env command failed)"
+        echo ""
+        echo "--- [DEBUG] 飞牛内置变量 ---"
+        echo "TRIM_PKGVAR         = [${TRIM_PKGVAR}] (length: ${#TRIM_PKGVAR})"
+        echo "TRIM_APPDEST        = [${TRIM_APPDEST}] (length: ${#TRIM_APPDEST})"
+        echo "TRIM_DATA_SHARE_PATHS = [${TRIM_DATA_SHARE_PATHS}] (length: ${#TRIM_DATA_SHARE_PATHS})"
+        echo "TRIM_SERVICE_PORT   = [${TRIM_SERVICE_PORT}] (length: ${#TRIM_SERVICE_PORT})"
+        echo ""
+        echo "--- [DEBUG] 应用计算变量 ---"
+        echo "DATA_DIR            = [${DATA_DIR}]"
+        echo "PORT                = [${PORT}]"
+        echo "DB_PATH             = [${DB_PATH}]"
+        echo "APP_BIN             = [${APP_BIN}]"
+        echo ""
+        echo "--- [DEBUG] APPDEST 目录内容 ---"
+        if [ -d "${TRIM_APPDEST}" ]; then
+            echo "APPDEST EXISTS: yes"
+            ls -laR "${TRIM_APPDEST}" 2>/dev/null || find "${TRIM_APPDEST}" -type f 2>/dev/null
+        else
+            echo "APPDEST EXISTS: NO! Path: ${TRIM_APPDEST}"
+            # 尝试查找父目录
+            PARENT_DIR=$(dirname "${TRIM_APPDEST}")
+            echo "Parent dir exists: $(test -d "${PARENT_DIR}" && echo yes || echo no)"
+            if [ -d "${PARENT_DIR}" ]; then
+                ls -la "${PARENT_DIR}/" 2>/dev/null
+            fi
+        fi
+        echo ""
+        echo "--- [DEBUG] 二进制文件详情 ---"
+        if [ -f "${APP_BIN}" ]; then
+            echo "BIN EXISTS: yes"
+            ls -la "${APP_BIN}"
+            file "${APP_BIN}" 2>/dev/null
+            stat "${APP_BIN}" 2>/dev/null
+            # 检查执行权限
+            if [ -x "${APP_BIN}" ]; then
+                echo "EXECUTABLE: YES"
+            else
+                echo "EXECUTABLE: NO! Attempting to fix..."
+                chmod +x "${APP_BIN}" 2>&1 && echo "chmod +x succeeded" || echo "chmod +x FAILED"
+            fi
+            # 尝试 ldd
+            echo "--- ldd check ---"
+            ldd "${APP_BIN}" 2>&1 || echo "(static binary or ldd not available)"
+        else
+            echo "BIN EXISTS: NO!"
+            echo "Searching for binary in server dir..."
+            SERVER_DIR=$(dirname "${APP_BIN}")
+            if [ -d "${SERVER_DIR}" ]; then
+                echo "Server directory exists, contents:"
+                ls -la "${SERVER_DIR}/" 2>/dev/null
+            else
+                echo "Server directory NOT found: ${SERVER_DIR}"
+                # 尝试在 APPDEST 下查找任何可执行文件
+                if [ -d "${TRIM_APPDEST}" ]; then
+                    echo "Searching for executables in APPDEST:"
+                    find "${TRIM_APPDEST}" -type f \( -name "*.bin" -o -name "*mail*" -o -name "server*" \) 2>/dev/null
+                    find "${TRIM_APPDEST}" -type f -executable 2>/dev/null
+                fi
+            fi
+        fi
+        echo ""
+        echo "--- [DEBUG] 数据目录 ---"
+        if [ -d "${DATA_DIR}" ]; then
+            echo "DATA_DIR EXISTS: yes"
+            ls -la "${DATA_DIR}/" 2>/dev/null
+        else
+            echo "DATA_DIR EXISTS: NO - will attempt to create"
+        fi
+        echo ""
+        echo "--- [DEBUG] PKGVAR 目录 ---"
+        if [ -d "${TRIM_PKGVAR}" ]; then
+            echo "PKGVAR EXISTS: yes"
+            ls -la "${TRIM_PKGVAR}/" 2>/dev/null
+        else
+            echo "PKGVAR EXISTS: NO - attempting to create..."
+            mkdir -p "${TRIM_PKGVAR}" 2>&1 && echo "Created successfully" || echo "FAILED to create"
+        fi
+        echo ""
+        echo "--- [DEBUG] 磁盘空间 ---"
+        df -h / 2>/dev/null
+        df -h "${TRIM_PKGVAR}" 2>/dev/null
+        echo ""
+        echo "--- [DEBUG] 端口 ${PORT} 状态 ---"
+        ss -tlnp 2>/dev/null | grep ":${PORT}" || echo "Port ${PORT} appears free"
+        echo ""
+        echo "--- [DEBUG] 进程检查 ---"
+        ps aux | grep -i magicmail 2>/dev/null | grep -v grep || echo "No magicmail process found"
+    } >> "${DIAG_FILE}" 2>&1
+}
+
+# ============================================================
+# 进程管理
+# ============================================================
+
+check_process() {
+    local pid=$1
+    if kill -0 "${pid}" 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+status() {
+    if [ -f "${PID_FILE}" ]; then
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if check_process "${pid}"; then
+            return 0
+        else
+            rm -f "${PID_FILE}"
+        fi
+    fi
+    return 1
+}
+
+start_process() {
+    log_msg "[DEBUG] start_process called"
+    
+    if status; then
+        log_msg "[DEBUG] Already running, skipping start"
+        return 0
+    fi
+
+    log_msg "[DEBUG] Calling diag START..."
+    diag "START"
+
+    # 1. 检查二进制文件是否存在
+    log_msg "[DEBUG] Checking binary: ${APP_BIN}"
+    if [ ! -f "${APP_BIN}" ]; then
+        log_msg "ERROR: Binary not found at ${APP_BIN}"
+        
+        # [DEBUG] 尝试搜索可能的二进制位置
+        log_msg "[DEBUG] Attempting to locate binary..."
+        if [ -d "${TRIM_APPDEST}" ]; then
+            log_msg "[DEBUG] Listing ${TRIM_APPDEST}:"
+            ls -laR "${TRIM_APPDEST}" >> "${LOG_FILE}" 2>&1
+        fi
+        
+        return 1
+    fi
+    
+    # [DEBUG] 确保有执行权限
+    log_msg "[DEBUG] Checking executable permission on ${APP_BIN}"
+    if [ ! -x "${APP_BIN}" ]; then
+        log_msg "[DEBUG] Binary is not executable, adding execute permission..."
+        chmod +x "${APP_BIN}"
+        if [ $? -ne 0 ]; then
+            log_msg "ERROR: Failed to add execute permission to ${APP_BIN}"
+            return 1
+        fi
+        log_msg "[DEBUG] Execute permission added successfully"
+    fi
+
+    # 2. 确保数据目录存在
+    log_msg "[DEBUG] Creating data dir: ${DATA_DIR}"
+    mkdir -p "${DATA_DIR}"
+    if [ ! -d "${DATA_DIR}" ]; then
+        log_msg "ERROR: Failed to create data dir ${DATA_DIR}"
+        return 1
+    fi
+
+    # 3. 检查端口是否被占用
+    log_msg "[DEBUG] Checking port ${PORT} availability"
+    if ss -tlnp 2>/dev/null | grep -q ":${PORT} "; then
+        log_msg "ERROR: Port ${PORT} already in use"
+        ss -tlnp 2>/dev/null | grep ":${PORT}" >> "${LOG_FILE}" 2>&1
+        return 1
+    fi
+
+    log_msg "Starting Magicmail..."
+    log_msg "PORT=${PORT} DB_PATH=${DB_PATH} DATA_DIR=${DATA_DIR}"
+    log_msg "APP_BIN=${APP_BIN}"
+
+    # 4. 启动进程（增强日志）
+    #    MAGICMAIL_DSN: 数据库路径（Go 代码识别的环境变量）
+    #    MAGICMAIL_PORT: 监听端口
+    #    MAGICMAIL_HOST: 监听地址
+    log_msg "[DEBUG] Executing: nohup ${APP_BIN} with env DSN=${DB_PATH}, PORT=${PORT}"
+    
+    export MAGICMAIL_DSN="${DB_PATH}"
+    export MAGICMAIL_PORT="${PORT}"
+    export MAGICMAIL_HOST="0.0.0.0"
+    
+    nohup "${APP_BIN}" >> "${LOG_FILE}" 2>&1 &
+    local launch_rc=$?
+    
+    local pid=$!
+    printf "%s" "${pid}" > "${PID_FILE}"
+
+    log_msg "[DEBUG] Launch result: rc=${launch_rc}, PID=${pid}"
+    
+    # [DEBUG] 记录启动命令的详细信息
+    echo "--- [DEBUG] Launch details ---" >> "${DIAG_FILE}" 2>/dev/null
+    echo "Launch RC: ${launch_rc}" >> "${DIAG_FILE}" 2>/dev/null
+    echo "PID: ${pid}" >> "${DIAG_FILE}" 2>/dev/null
+    echo "Command: nohup ${APP_BIN}" >> "${DIAG_FILE}" 2>/dev/null
+    echo "Environment:" >> "${DIAG_FILE}" 2>/dev/null
+    echo "  MAGICMAIL_DSN=${MAGICMAIL_DSN}" >> "${DIAG_FILE}" 2>/dev/null
+    echo "  MAGICMAIL_PORT=${MAGICMAIL_PORT}" >> "${DIAG_FILE}" 2>/dev/null
+    echo "  MAGICMAIL_HOST=${MAGICMAIL_HOST}" >> "${DIAG_FILE}" 2>/dev/null
+
+    # 5. 等待确认启动
+    local count=0
+    while [ $count -lt 10 ]; do
+        sleep 1
+        count=$((count + 1))
+        
+        log_msg "[DEBUG] Waiting... (${count}s/10s)"
+
+        if ! check_process "${pid}"; then
+            log_msg "ERROR: Process ${pid} died after ${count}s"
+            
+            # [DEBUG] 收集崩溃信息
+            log_msg "[DEBUG] Process exited unexpectedly"
+            echo "=== PROCESS CRASH REPORT ===" >> "${DIAG_FILE}" 2>/dev/null
+            echo "PID: ${pid}" >> "${DIAG_FILE}" 2>/dev/null
+            echo "Died after: ${count}s" >> "${DIAG_FILE}" 2>/dev/null
+            echo "Exit code: $(wait ${pid} 2>/dev/null; echo $?)" >> "${DIAG_FILE}" 2>/dev/null
+            echo "--- Last 30 lines of log ---" >> "${DIAG_FILE}" 2>/dev/null
+            tail -30 "${LOG_FILE}" >> "${DIAG_FILE}" 2>/dev/null
+            
+            rm -f "${PID_FILE}"
+            return 1
+        fi
+
+        # 检查端口是否已监听
+        if ss -tlnp 2>/dev/null | grep -q ":${PORT} "; then
+            log_msg "SUCCESS: Process is listening on port ${PORT}"
+            return 0
+        fi
+        
+        # [DEBUG] 每3秒记录一次进程状态
+        if [ $((count % 3)) -eq 0 ]; then
+            log_msg "[DEBUG] Port not yet listening, process still alive (PID=${pid})"
+        fi
+    done
+
+    # 6. 进程还活着但端口未监听？记录一下继续
+    if check_process "${pid}"; then
+        log_msg "WARNING: Process running but port ${PORT} not yet listening after ${count}s"
+        
+        # [调试] 获取进程更多信息
+        echo "=== PORT TIMEOUT REPORT ===" >> "${DIAG_FILE}" 2>/dev/null
+        echo "PID: ${pid}" >> "${DIAG_FILE}" 2>/dev/null
+        echo "Waited: ${count}s" >> "${DIAG_FILE}" 2>/dev/null
+        echo "Process info:" >> "${DIAG_FILE}" 2>/dev/null
+        ps aux | grep "${pid}" | grep -v grep >> "${DIAG_FILE}" 2>/dev/null
+        echo "All network listeners:" >> "${DIAG_FILE}" 2>/dev/null
+        ss -tlnp 2>/dev/null >> "${DIAG_FILE}" 2>/dev/null || true
+        
+        return 0
+    else
+        log_msg "ERROR: Process died during startup"
+        
+        # [DEBUG]
+        echo "=== LATE CRASH REPORT ===" >> "${DIAG_FILE}" 2>/dev/null
+        echo "Process died after waiting ${count}s" >> "${DIAG_FILE}" 2>/dev/null
+        tail -30 "${LOG_FILE}" >> "${DIAG_FILE}" 2>/dev/null
+        
+        rm -f "${PID_FILE}"
+        return 1
+    fi
+}
+
+stop_process() {
+    log_msg "Stopping Magicmail..."
+
+    diag "STOP"
+
+    if [ -r "${PID_FILE}" ]; then
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+
+        log_msg "pid=${pid}"
+        if ! check_process "${pid}"; then
+            rm -f "${PID_FILE}"
+            log_msg "Process already stopped"
+            return 0
+        fi
+
+        log_msg "Sending TERM signal to PID:${pid}..."
+        kill -TERM ${pid} >> "${LOG_FILE}" 2>&1
+
+        local count=0
+        while check_process "${pid}" && [ $count -lt 10 ]; do
+            sleep 1
+            count=$((count + 1))
+            log_msg "Waiting... (${count}s/10s)"
+        done
+
+        if check_process "${pid}"; then
+            log_msg "Sending KILL signal to PID:${pid}..."
+            kill -KILL "${pid}"
+            sleep 1
+        fi
+        rm -f "${PID_FILE}"
+        log_msg "Stopped"
+    else
+        log_msg "No PID file found"
+    fi
+
+    return 0
+}
+
+# ============================================================
+# 入口
+# ============================================================
+
+log_msg "[DEBUG] Script entry point reached, action: $1"
+
+case $1 in
+start)
+    log_msg "[DEBUG] Action: start"
+    start_process
+    exit_code=$?
+    log_msg "[DEBUG] start_process exit code: ${exit_code}"
+    exit ${exit_code}
+    ;;
+stop)
+    log_msg "[DEBUG] Action: stop"
+    stop_process
+    ;;
+status)
+    log_msg "[DEBUG] Action: status"
+    diag "STATUS"
+    if status; then
+        log_msg "STATUS: running"
+        exit 0
+    else
+        log_msg "STATUS: not running"
+        exit 3
+    fi
+    ;;
+diag)
+    # 手动诊断命令
+    log_msg "[DEBUG] Action: diag"
+    diag "MANUAL"
+    echo "Diagnostics written to ${DIAG_FILE}"
+    cat "${DIAG_FILE}"
+    ;;
+*)
+    log_msg "[DEBUG] Unknown action: $1"
+    echo "Usage: $0 {start|stop|status|diag}"
+    exit 1
+    ;;
+esac

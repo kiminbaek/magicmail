@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# 卸载前回调
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+DIAG_FILE="${TRIM_PKGVAR}/diag.log"
+
+{
+    echo "========== $(date '+%Y-%m-%d %H:%M:%S') uninstall_init =========="
+    echo "wizard_data_action = ${wizard_data_action}"
+} >> "${DIAG_FILE}" 2>&1
+
+exit 0

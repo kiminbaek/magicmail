@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# 卸载后回调
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+DIAG_FILE="${TRIM_PKGVAR}/diag.log"
+
+{
+    echo "========== $(date '+%Y-%m-%d %H:%M:%S') uninstall_callback =========="
+    if [ "${wizard_data_action}" = "delete" ]; then
+        DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+        echo "Deleting data in ${DATA_DIR}..."
+        rm -rf "${DATA_DIR}"/*
+        echo "Data deleted"
+    else
+        echo "Data kept"
+    fi
+} >> "${DIAG_FILE}" 2>&1
+
+exit 0

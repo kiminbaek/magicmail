@@ -1,0 +1,51 @@
+[Unit]
+Description=Magicmail - IMAP 邮件代收服务
+Documentation=https://github.com/magiccode1412/magicmail
+Homepage=https://160621.xyz/magicmail
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nobody
+
+# 工作目录
+WorkingDirectory=/var/lib/magicmail
+
+# 二进制路径
+ExecStart=/usr/local/bin/magicmail
+
+# 环境变量（按需修改）
+Environment="MAGICMAIL_ENV=production"
+Environment="MAGICMAIL_PORT=8080"
+Environment="MAGICMAIL_HOST=0.0.0.0"
+Environment="MAGICMAIL_DSN=/var/lib/magicmail/data/magicmail.db"
+Environment="MAGICMAIL_POLL_INTERVAL=300"
+Environment="MAGICMAIL_IDLE_ENABLED=true"
+Environment="MAGICMAIL_MAX_CONCURRENT=10"
+Environment="MAGICMAIL_SYNC_BATCH_SIZE=50"
+
+# 重启策略：崩溃后自动重启，最多 5 次
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/magicmail/data
+PrivateTmp=true
+
+# 资源限制
+LimitNOFILE=65536
+
+# 日志输出到 journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=magicmail
+
+[Install]
+WantedBy=multi-user.target

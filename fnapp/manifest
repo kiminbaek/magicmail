@@ -1,0 +1,12 @@
+appname               = magicmail
+version               = 1.0.0
+display_name          = 魔法邮箱
+desc                  = 魔法邮箱 - 基于 IMAP 协议的统一邮件管理平台，一站式收取、管理多个邮箱。支持 IMAP IDLE 实时推送、PWA 客户端、Webhook 通知、多账号管理、邮件去重等功能。
+platform              = x86
+source                = thirdparty
+maintainer            = magiccode1412
+maintainer_url        = https://github.com/magiccode1412/magicmail
+distributor           = magiccode1412
+distributor_url       = https://github.com/magiccode1412/magicmail
+desktop_uidir         = ui
+desktop_applaunchname = magicmail.Application

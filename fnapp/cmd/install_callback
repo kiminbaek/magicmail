@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# 安装完成后回调
+# 记录安装诊断信息
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+DIAG_FILE="${TRIM_PKGVAR}/diag.log"
+DATA_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+
+{
+    echo "========== $(date '+%Y-%m-%d %H:%M:%S') install_callback =========="
+    echo "TRIM_PKGVAR           = ${TRIM_PKGVAR}"
+    echo "TRIM_APPDEST          = ${TRIM_APPDEST}"
+    echo "TRIM_DATA_SHARE_PATHS = ${TRIM_DATA_SHARE_PATHS}"
+    echo "DATA_DIR              = ${DATA_DIR}"
+    echo "TRIM_SERVICE_PORT     = ${TRIM_SERVICE_PORT}"
+    echo "wizard_app_port       = ${wizard_app_port}"
+    echo ""
+    echo "--- app 目录内容 ---"
+    ls -laR "${TRIM_APPDEST}" 2>/dev/null
+    echo ""
+} >> "${DIAG_FILE}" 2>&1
+
+# 确保数据目录存在
+mkdir -p "${DATA_DIR}"
+
+exit 0

@@ -1,0 +1,11 @@
+[
+    {
+        "stepTitle": "更新 Magicmail",
+        "items": [
+            {
+                "type": "tips",
+                "helpText": "即将更新 Magicmail 到新版本，您的数据将被保留。"
+            }
+        ]
+    }
+]

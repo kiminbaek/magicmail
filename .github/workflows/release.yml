@@ -1,0 +1,199 @@
+# ============================================================================
+# Magicmail CI/CD - 多架构构建 & 发布到 GitHub Release
+# 触发条件：推送 v* 开头的 tag（如 v1.0.0）
+# 构建产物：linux amd64/arm/arm64、darwin amd64/arm64、windows amd64
+# ============================================================================
+
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # 支持手动触发
+    inputs:
+      version:
+        description: '版本号 (如 v1.0.0, 留空则使用当前最新 tag)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  # 从 tag 提取版本号（如 v1.0.0 → 1.0.0），手动触发时使用输入值或最新 tag
+  VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+jobs:
+  # ==========================================================================
+  # Job 1: 构建前端（只需执行一次，所有平台共用）
+  # ==========================================================================
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+          package_json_file: web/package.json
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+
+      - run: pnpm build
+        working-directory: web
+
+      # 将前端产物打包上传，供后续编译任务使用
+      - uses: actions/upload-artifact@v5
+        with:
+          name: frontend-dist
+          path: server/dist/
+          retention-days: 1
+
+  # ==========================================================================
+  # Job 2: 多架构交叉编译 Go 二进制
+  # ==========================================================================
+  build-binary:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: ''
+          - goos: linux
+            goarch: arm
+            goarm: '7'
+            suffix: '-arm'
+          - goos: linux
+            goarch: arm64
+            suffix: '-arm64'
+          - goos: darwin
+            goarch: amd64
+            suffix: '-macos-x86_64'
+          - goos: darwin
+            goarch: arm64
+            suffix: '-macos-arm64'
+          - goos: windows
+            goarch: amd64
+            suffix: '.exe'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: server/go.sum
+
+      # 下载前端构建产物
+      - uses: actions/download-artifact@v5
+        with:
+          name: frontend-dist
+          path: server/embedfs/dist/
+
+      # 编译（前端已就位，//go:embed 直接嵌入）
+      - name: Build Go binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm || '7' }}
+          CGO_ENABLED: 0
+        working-directory: server
+        run: |
+          OUTPUT="../dist/magicmail${{ matrix.suffix }}"
+          go build \
+            -ldflags="-s -w -X main.version=${VERSION}" \
+            -o "${OUTPUT}" \
+            .
+          echo "Built: $(du -h ${OUTPUT} | cut -f1)"
+
+      # 上传单个二进制产物
+      - uses: actions/upload-artifact@v5
+        with:
+          name: magicmail-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/magicmail${{ matrix.suffix }}
+          retention-days: 1
+
+  # ==========================================================================
+  # Job 3: 创建 GitHub Release，附带所有平台产物
+  # ==========================================================================
+  release:
+    name: Create GitHub Release
+    needs: build-binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # 下载全部编译产物
+      - uses: actions/download-artifact@v5
+        with:
+          path: all-artifacts
+          pattern: magicmail-*
+          merge-multiple: false
+
+      # 查看产物结构（调试用）
+      - name: List artifacts
+        run: find all-artifacts -type f | sort
+
+      # 生成 CHANGELOG（取最近的 git log）
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            BODY=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
+          else
+            BODY=$(git log --pretty=format="- %s (%h)" -20)
+          fi
+          # 写入 GITHUB_OUTPUT 供后续步骤使用
+          {
+            echo "changelog<<EOF"
+            echo "## 📦 Magicmail $VERSION"
+            echo ""
+            echo "### 变更内容"
+            echo ""
+            echo "$BODY"
+            echo ""
+            echo "### 下载"
+            echo ""
+            echo "| 平台 | 架构 | 文件 |"
+            echo "|------|------|------|"
+            echo "| Linux | x86_64 | \`magicmail\` |"
+            echo "| Linux | ARM32 (armv7) | \`magicmail-arm\` |"
+            echo "| Linux | ARM64 | \`magicmail-arm64\` |"
+            echo "| macOS | Intel | \`magicmail-macos-x86_64\` |"
+            echo "| macOS | Apple Silicon | \`magicmail-macos-arm64\` |"
+            echo "| Windows | x86_64 | \`magicmail.exe\` |"
+            echo ""
+            echo "> 解压后直接运行，无需额外依赖。默认监听 \`http://localhost:8080\`"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      # 创建 Release 并上传所有资产
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: "Magicmail ${{ env.VERSION }}"
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: ${{ contains(env.VERSION, '-') }}
+          files: |
+            all-artifacts/magicmail-linux-amd64/magicmail
+            all-artifacts/magicmail-linux-arm/magicmail-arm
+            all-artifacts/magicmail-linux-arm64/magicmail-arm64
+            all-artifacts/magicmail-darwin-amd64/magicmail-macos-x86_64
+            all-artifacts-magicmail-darwin-arm64/magicmail-macos-arm64
+            all-artifacts/magicmail-windows-amd64/magicmail.exe

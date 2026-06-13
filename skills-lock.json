@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "fnnas-docs": {
+      "source": "tnnevol/skills",
+      "sourceType": "github",
+      "skillPath": "skills/fnnas-docs/SKILL.md",
+      "computedHash": "a19503734cabdd5827e0dd21e83828a3adb8dbcc6a4551da949c6fc20b1c045b"
+    },
+    "frontend-code-review": {
+      "source": "langgenius/dify",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/frontend-code-review/SKILL.md",
+      "computedHash": "bdf7a12765d6d9bf5de341c7d45151b83022db1f548cae4d9bb437641aad3374"
+    }
+  }
+}
