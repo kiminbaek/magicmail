@@ -1,6 +1,6 @@
 # ============================================================================
 # Magicmail Docker 镜像 CI/CD
-# 多架构构建 (linux/amd64 + linux/arm64) 并同步推送至 Docker Hub + GitHub Container Registry
+# 多架构构建 (linux/amd64 + linux/arm64 + linux/arm/v7) 并同步推送至 Docker Hub + GitHub Container Registry
 # 触发条件: 推送 tag (v*) 或手动触发
 # ============================================================================
 
@@ -111,7 +111,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: ${{ github.event_name == 'push' || inputs.push_image == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
