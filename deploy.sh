@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 # ============================================================================
 # Magicmail 一键部署脚本
+# Copyright (C) 2026 magiccode (魔法代码)
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Project: https://github.com/magiccode1412/magicmail
+# License: AGPL-3.0 (https://github.com/magiccode1412/magicmail/blob/main/LICENSE)
+#
 # 用法: ./deploy.sh [命令] [选项]
 #
 # 命令:
@@ -235,21 +253,22 @@ _to_jsdelivr_url() {
     echo "${url}" | sed -E 's|https?://raw\.githubusercontent\.com/[^/]+/[^/]+/|'"${JSDELVR_BASE}"'@|'
 }
 
-# 获取所有可尝试的 URL 列表（原始 + 各镜像）
+# 获取所有可尝试的 URL 列表（原始 + jsDelivr(仅raw) + 各镜像代理）
 _get_mirror_urls() {
     local url="$1"
 
+    # 1. 始终先尝试直连（短超时快速判断）
+    printf '%s\n' "${url}"
+
+    # 2. raw 文件额外提供 jsDelivr CDN 加速
     if _is_raw_url "${url}"; then
-        # raw 文件：jsDelivr 最快最稳定，放第二位（直连之后）
-        printf '%s\n' "${url}"
         printf '%s\n' "$(_to_jsdelivr_url "${url}")"
     fi
 
-    # 所有 GitHub URL 都走通用代理链
+    # 3. 通用镜像代理链（适用于 API/Release/raw 全类型）
     local prefix
     for prefix in "${MIRROR_PREFIXES[@]}"; do
-        # 跳过空字符串（已在前面处理了原始 URL）
-        [ -z "${prefix}" ] && continue
+        [ -z "${prefix}" ] && continue  # 跳过空元素（已用原始 URL）
         printf '%s\n' "${prefix}${url}"
     done
 }
@@ -452,27 +471,44 @@ get_latest_version() {
     api_urls="$(_get_mirror_urls "${RELEASE_URL}")"
 
     local version=""
+    local http_code=""
     local api_url
     while IFS= read -r api_url; do
         [ -z "${api_url}" ] && continue
 
         if command -v curl &>/dev/null; then
-            version="$(curl -fsSL --connect-timeout 10 --max-time 30 \
-                "${api_url}" 2>/dev/null \
-                | grep '"tag_name"' | head -1 \
+            # 同时提取 HTTP 状态码和响应体（用于区分网络问题 vs 无 Release）
+            http_code="$(curl -fsSL -o /tmp/magicmail_api_resp.json \
+                -w '%{http_code}' --connect-timeout 10 --max-time 30 \
+                "${api_url}" 2>/dev/null || true)"
+
+            version="$(grep '"tag_name"' /tmp/magicmail_api_resp.json 2>/dev/null | head -1 \
                 | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/' || true)"
+
+            # 404 = 该仓库暂未发布 Release，无需继续尝试镜像
+            if [ "${http_code}" = "404" ]; then
+                rm -f /tmp/magicmail_api_resp.json
+                die "该仓库暂未发布任何 Release（HTTP 404）。
+  请先在 GitHub 上创建一个 Release: ${REPO_URL}/releases/new
+  或使用 --version V.x.y.z 手动指定版本"
+            fi
         elif command -v wget &>/dev/null; then
-            version="$(wget --timeout=30 -qO- \
-                "${api_url}" 2>/dev/null \
-                | grep '"tag_name"' | head -1 \
+            wget --timeout=30 -qO- "${api_url}" > /tmp/magicmail_api_resp.json 2>/dev/null || true
+            version="$(grep '"tag_name"' /tmp/magicmail_api_resp.json 2>/dev/null | head -1 \
                 | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/' || true)"
         fi
 
-        if [ -n "${version}" ]; then echo "${version}"; return; fi
+        if [ -n "${version}" ]; then
+            rm -f /tmp/magicmail_api_resp.json
+            echo "${version}"
+            return
+        fi
     done <<< "${api_urls}"
 
+    rm -f /tmp/magicmail_api_resp.json
     die "无法获取最新版本号，请检查网络连接或手动指定版本 (--version V.x.y.z)
-  提示: 国内用户如遇 GitHub 访问问题，脚本会自动切换镜像代理"
+  提示: 国内用户如遇 GitHub 访问问题，脚本会自动切换代理；如全部失败请检查服务器是否能访问外网
+  Release 页面: ${REPO_URL}/releases"
 }
 
 # 通用文件下载（自动切换镜像）
@@ -1470,14 +1506,62 @@ print_summary() {
 # 第九部分：入口与参数解析
 # ═══════════════════════════════════════════════════════
 
+# 交互式操作菜单（无参数运行时触发）
+_show_interactive_menu() {
+    # 检测是否已安装
+    local installed=""
+    if [ -f "${INSTALL_DIR}/${BIN_NAME}" ] 2>/dev/null || command -v "${BIN_NAME}" &>/dev/null; then
+        installed="(已安装)"
+    fi
+
+    echo ""
+    echo -e "${CYAN}${BOLD}请选择操作${NC} ${YELLOW}${installed}${NC}"
+    echo ""
+    echo "  1) 安装 / 重装 install"
+    echo "  2) 更新版本     update"
+    echo "  3) 卸载程序     uninstall"
+    echo "  4) 查看状态     status"
+    echo "  5) 环境自检     doctor"
+    echo "  6) 查看帮助     help"
+    echo "  0) 退出"
+    echo ""
+
+    while true; do
+        printf "${CYAN}> 请输入选项 [0-6]: ${NC}"
+        read -r choice
+
+        case "${choice}" in
+            1) SELECTED_CMD="install"; return ;;
+            2) SELECTED_CMD="update"; return ;;
+            3) SELECTED_CMD="uninstall"; return ;;
+            4) SELECTED_CMD="status"; return ;;
+            5) SELECTED_CMD="doctor"; return ;;
+            6|''|h|H|help)
+                show_help
+                # 帮助显示后重新提示选择
+                echo ""
+                printf "${CYAN}> 请输入选项 [0-6]: ${NC}"
+                continue
+                ;;
+            0|q|Q|exit|quit)
+                echo -e "${DIM}已退出。${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}无效选项，请输入 0-6${NC}"
+                ;;
+        esac
+    done
+}
+
 show_help() {
     echo ""
     echo -e "${CYAN}${BOLD}Magicmail 一键部署工具${NC}"
     echo ""
     echo "用法: $0 [命令] [选项]"
     echo ""
-    echo "命令:"
-    echo "  install       安装并启动服务（默认）"
+    echo "命令 (不带参数运行时显示交互菜单):"
+    echo "  install       安装并启动服务"
     echo "  start         启动服务"
     echo "  stop          停止服务"
     echo "  restart       重启服务"
@@ -1549,7 +1633,16 @@ main() {
         esac
     done
 
-    cmd="${cmd:-install}"
+    # 无参数时显示交互菜单
+    if [ -z "${cmd}" ]; then
+        if [ "${INTERACTIVE}" = "true" ] && [ -t 0 ]; then
+            _show_interactive_menu
+            cmd="${SELECTED_CMD:-help}"
+        else
+            # 非交互环境（管道/Cron）默认安装
+            cmd="install"
+        fi
+    fi
 
     # 路由分发
     case "${cmd}" in

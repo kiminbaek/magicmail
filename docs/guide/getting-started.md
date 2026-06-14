@@ -21,17 +21,17 @@
 :::: code-group
 
 ```bash [GitHub 原始]
-curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o deploy.sh
+curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o magicmail.sh
 ```
 
 ```bash [jsDelivr 镜像（国内）]
-curl -fsSL https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh -o deploy.sh
+curl -fsSL https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh -o magicmail.sh
 ```
 
 ::::
 
 ```bash
-chmod +x deploy.sh && sudo ./deploy.sh install
+chmod +x magicmail.sh && sudo ./magicmail.sh install
 ```
 
 安装后使用 `magicmail` 命令管理服务：

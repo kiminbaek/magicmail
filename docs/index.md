@@ -19,7 +19,7 @@ hero:
 features:
   - icon: 🚀
     title: 一键部署
-    details: 提供 deploy.sh 一键部署脚本，自动识别平台、安装依赖、下载二进制、注册系统服务和全局 CLI 命令，支持 Linux/macOS/Docker。
+    details: 提供一键部署脚本 (magicmail.sh)，自动识别平台、安装依赖、下载二进制、注册系统服务和全局 CLI 命令，支持 Linux/macOS/Docker。
   - icon: 📥
     title: IMAP 代收
     details: 通过 IMAP 协议代理收取多个邮箱账号的邮件，支持 TLS 连接、全量/增量同步，自动去重存储到本地数据库。
@@ -57,13 +57,13 @@ features:
 :::: code-group
 
 ```bash [一键部署（GitHub）]
-curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o deploy.sh
-chmod +x deploy.sh && sudo ./deploy.sh install
+curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o magicmail.sh
+chmod +x magicmail.sh && sudo ./magicmail.sh install
 ```
 
 ```bash [一键部署（jsDelivr 国内加速）]
-curl -fsSL https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh -o deploy.sh
-chmod +x deploy.sh && sudo ./deploy.sh install
+curl -fsSL https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh -o magicmail.sh
+chmod +x magicmail.sh && sudo ./magicmail.sh install
 ```
 
 ```bash [源码构建]

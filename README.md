@@ -153,18 +153,18 @@
 
 ```bash
 # 方式 A：原始地址（国外 / 有代理环境）
-curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o deploy.sh
+curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o magicmail.sh
 
 # 方式 B：jsDelivr CDN 镜像（国内推荐，速度快）
-curl -fsSL https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh -o deploy.sh
+curl -fsSL https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh -o magicmail.sh
 
-chmod +x deploy.sh && sudo ./deploy.sh install
+chmod +x magicmail.sh && sudo ./magicmail.sh install
 
 # 安装指定版本
-sudo ./deploy.sh install --version v1.0.0
+sudo ./magicmail.sh install --version v1.0.0
 
 # 非交互模式（跳过所有确认）
-sudo ./deploy.sh install -y
+sudo ./magicmail.sh install -y
 ```
 
 安装完成后，可通过全局命令 `magicmail` 管理服务：
@@ -183,7 +183,7 @@ magicmail uninstall    # 卸载程序
 
 # 查看帮助
 magicmail help
-./deploy.sh help
+./magicmail.sh help
 ```
 
 #### 支持的平台与特性
@@ -507,7 +507,7 @@ cd server && go build -o ../bin/magicmail .
 - ⚠️ **SQLite 并发写入**：高并发场景下建议迁移到 PostgreSQL/MySQL
 - ✅ **跨平台编译**：使用纯 Go SQLite 驱动 (`modernc.org/sqlite`)，无需 CGO，可直接交叉编译 Linux/macOS/Windows
 - ✅ **混合附件缓存**：默认关闭自动缓存（`MAGICMAIL_AUTO_CACHE=false`），大附件采用懒加载模式按需从 IMAP 获取，不占用额外磁盘空间
-- 🚀 **一键部署**：使用 `deploy.sh install` 可在服务器上快速部署，安装后通过 `magicmail` 命令管理服务，支持 `doctor` 自检和 `update` 一键更新
+- 🚀 **一键部署**：使用 `magicmail.sh install` 可在服务器上快速部署，安装后通过 `magicmail` 命令管理服务，支持 `doctor` 自检和 `update` 一键更新
 - 🔒 **AGPL-3.0 许可**：本程序基于 AGPLv3 开源协议发布，网络使用需提供源代码获取方式
 
 ## License

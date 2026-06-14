@@ -9,17 +9,17 @@
 :::: code-group
 
 ```bash [GitHub 原始]
-curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o deploy.sh
+curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o magicmail.sh
 ```
 
 ```bash [jsDelivr 镜像（国内）]
-curl -fsSL https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh -o deploy.sh
+curl -fsSL https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh -o magicmail.sh
 ```
 
 ::::
 
 ```bash
-chmod +x deploy.sh && sudo ./deploy.sh install
+chmod +x magicmail.sh && sudo ./magicmail.sh install
 ```
 
 > 脚本内置 **GitHub 镜像自动切换**：当直连 `github.com` 失败时，会依次尝试以下镜像加速：
@@ -43,16 +43,16 @@ chmod +x deploy.sh && sudo ./deploy.sh install
 
 ```bash
 # 指定端口
-sudo ./deploy.sh install --port 3000
+sudo ./magicmail.sh install --port 3000
 
 # 安装指定版本
-sudo ./deploy.sh install --version v1.0.0
+sudo ./magicmail.sh install --version v1.0.0
 
 # 非交互模式（跳过所有确认，适合 CI/CD）
-sudo ./deploy.sh install -y
+sudo ./magicmail.sh install -y
 
 # 组合使用
-sudo ./deploy.sh install --port 9090 --version v1.2.0 -y
+sudo ./magicmail.sh install --port 9090 --version v1.2.0 -y
 ```
 
 ### magicmail 命令行工具
@@ -84,7 +84,7 @@ magicmail uninstall    # 卸载程序（数据可选保留）
 
 ```bash
 magicmail help         # 查看 CLI 命令帮助
-./deploy.sh help       # 查看完整部署脚本帮助
+./magicmail.sh help       # 查看完整部署脚本帮助
 ```
 
 ### doctor 自检命令
@@ -151,12 +151,12 @@ magicmail help         # 查看 CLI 命令帮助
 
 ```bash
 # 更新到最新版本
-sudo ./deploy.sh update
+sudo ./magicmail.sh update
 # 或
 sudo magicmail update
 
 # 卸载（保留数据）
-sudo ./deploy.sh uninstall
+sudo ./magicmail.sh uninstall
 # 或
 sudo magicmail uninstall
 
