@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
 # Magicmail 一键部署脚本
-# 用法: ./deploy.sh [命令]
+# 用法: ./deploy.sh [命令] [选项]
 #
 # 命令:
 #   install     安装并启动服务（默认）
@@ -12,6 +12,17 @@
 #   update      更新到最新版本
 #   uninstall   卸载（保留数据，可选删除）
 #   logs        查看日志
+#   version     显示版本信息
+#   doctor      环境自检
+#   help        显示帮助信息
+#
+# 选项:
+#   --yes, -y   跳过确认提示（非交互模式）
+#   --version V  指定安装版本（默认 latest）
+#   --port P     指定监听端口（默认 8080）
+#
+# 安装后可通过 magicmail 命令管理:
+#   magicmail status / start / stop / restart / update / uninstall / logs / version / doctor
 # ============================================================================
 set -euo pipefail
 
@@ -21,7 +32,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
 # ─── 配置 ──────────────────────────────────────────
@@ -30,15 +43,22 @@ REPO_URL="https://github.com/${REPO}"
 API_URL="https://api.github.com/repos/${REPO}"
 RELEASE_URL="${API_URL}/releases/latest"
 
-# 安装路径
 INSTALL_DIR="/opt/magicmail"
 BIN_NAME="magicmail"
 DATA_DIR="/var/lib/magicmail"
 LOG_FILE="/var/log/magicmail.log"
 CONFIG_DIR="${INSTALL_DIR}/config"
-
-# systemd 服务名
 SERVICE_NAME="magicmail"
+CLI_BIN="/usr/local/bin/${BIN_NAME}"
+DEFAULT_PORT=8080
+
+# 全局变量
+TARGET_OS=""
+TARGET_ARCH=""
+TARGET_VERSION=""
+TARGET_PORT="${DEFAULT_PORT}"
+INTERACTIVE=true
+IN_DOCKER=false
 
 # ─── 工具函数 ──────────────────────────────────────
 info()    { echo -e "${BLUE}[INFO]${NC}  $*"; }
@@ -48,45 +68,358 @@ error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 die()     { error "$*"; exit 1; }
 
 print_banner() {
+    echo ""
     echo -e "${CYAN}${BOLD}"
-    echo "╔══════════════════════════════════════════╗"
-    echo "║        Magicmail 邮件管理系统                ║"
-    echo "║           一键部署工具                     ║"
-    echo "╚══════════════════════════════════════════╝"
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║${NC}${CYAN}       Magicmail 邮件管理系统 v$(get_installed_version 2>/dev/null || echo '?.?.?')${CYAN}         ║"
+    echo "║           一键部署工具                        ║"
+    echo "╚══════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
 
-# 检测操作系统
+# ═══════════════════════════════════════════════════════
+# 第一部分：平台检测模块
+# ═══════════════════════════════════════════════════════
+
+# 检测操作系统类型 (linux/darwin/windows)
 detect_os() {
     local os_name="$(uname -s)"
     case "${os_name,,}" in
-        linux*)
-            echo "linux" ;;
-        darwin*)
-            echo "darwin" ;;
-        msys*|mingw*|cygwin*)
-            echo "windows" ;;
-        *)
-            die "不支持的操作系统: ${os_name}" ;;
+        linux*)   echo "linux" ;;
+        darwin*)  echo "darwin" ;;
+        msys*|mingw*|cygwin*) echo "windows" ;;
+        *)       die "不支持的操作系统: ${os_name}" ;;
     esac
 }
 
-# 检测 CPU 架构
+# 检测 CPU 架构 (amd64/arm64)
 detect_arch() {
     local arch_name="$(uname -m)"
-    case "${arch_name}" in
-        x86_64|amd64)
-            echo "amd64" ;;
-        aarch64|arm64)
-            echo "arm64" ;;
-        armv7l|armhf)
-            die "不支持 ARMv7，请使用 ARM64 (aarch64) 设备" ;;
-        i386|i686)
-            die "不支持 32 位系统，请使用 64 位系统" ;;
-        *)
-            die "不支持的 CPU 架构: ${arch_name}" ;;
+    case "${arch_name,,}" in
+        x86_64|amd64)  echo "amd64" ;;
+        aarch64|arm64) echo "arm64" ;;
+        armv7l|armhf)  die "不支持 ARMv7，请使用 ARM64 (aarch64) 设备" ;;
+        i386|i686)     die "不支持 32 位系统，请使用 64 位系统" ;;
+        *)             die "不支持的 CPU 架构: ${arch_name}" ;;
     esac
 }
+
+# 检测是否运行在 Docker 容器内
+is_docker() {
+    if [ -f /.dockerenv ] 2>/dev/null; then
+        return 0
+    fi
+    if [ -f /proc/1/cgroup ] 2>/dev/null && grep -qE 'docker|lxc|containerd' /proc/1/cgroup 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# 检测 Linux 发行版名称
+detect_distro() {
+    if [[ "$(uname -s)" != "Linux"* ]]; then
+        echo "macOS"
+        return
+    fi
+
+    # 优先使用 /etc/os-release (最可靠)
+    if [ -f /etc/os-release ]; then
+        # shellcheck source=/dev/null
+        . /etc/os-release
+        case "${ID,,}" in
+            debian|ubuntu|linuxmint|pop|elementary)
+                echo "debian" ;;
+            centos|rhel|rocky|alma|fedora|ol)
+                echo "rhel" ;;
+            alpine)
+                echo "alpine" ;;
+            arch|manjaro|endeavouros)
+                echo "arch" ;;
+            opensuse*|suse|sles)
+                echo "opensuse" ;;
+            *)
+                echo "${ID:-unknown}" ;;
+        esac
+        return
+    fi
+
+    # 兜底探测
+    if [ -f /etc/debian_version ]; then
+        echo "debian"
+    elif [ -f /etc/redhat-release ]; then
+        echo "rhel"
+    elif [ -f /etc/alpine-release ]; then
+        echo "alpine"
+    elif [ -f /etc/arch-release ]; then
+        echo "arch"
+    elif [ -f /etc/SuSE-release ] || [ -f /etc/SUSE-brand ]; then
+        echo "opensuse"
+    else
+        echo "unknown-linux"
+    fi
+}
+
+# 获取可用的包管理器名称
+get_package_manager() {
+    local distro
+    distro="$(detect_distro)"
+    case "${distro}" in
+        debian)
+            if command -v apt-get &>/dev/null; then echo "apt"; return; fi
+            ;;
+        rhel)
+            if command -v dnf &>/dev/null; then echo "dnf"; return; fi
+            if command -v yum &>/dev/null; then echo "yum"; return; fi
+            ;;
+        alpine)
+            if command -v apk &>/dev/null; then echo "apk"; return; fi
+            ;;
+        arch)
+            if command -v pacman &>/dev/null; then echo "pacman"; return; fi
+            ;;
+        opensuse)
+            if command -v zypper &>/dev/null; then echo "zypper"; return; fi
+            ;;
+        macOS)
+            if command -v brew &>/dev/null; then echo "brew"; return; fi
+            ;;
+    esac
+
+    # 全局兜底扫描
+    for pm in apt dnf yum apk pacman zypper brew; do
+        if command -v "${pm}" &>/dev/null; then
+            echo "${pm}"
+            return
+        fi
+    done
+
+    echo "unknown"
+}
+
+is_linux() { [[ "$(uname -s)" == Linux* ]]; }
+is_macos() { [[ "$(uname -s)" == Darwin* ]]; }
+
+# ═══════════════════════════════════════════════════════
+# 第一点五：GitHub 镜像代理（国内加速）
+# ═══════════════════════════════════════════════════════
+
+# 镜像代理列表（按优先级排序，依次尝试）
+# 格式: "前缀" - 将 GitHub URL 前面加上此前缀即可使用镜像
+MIRROR_PREFIXES=(
+    ""                                          # 原始地址（优先直连）
+    "https://mirror.ghproxy.com/"              # ghproxy 镜像（全类型通用）
+    "https://gh-proxy.com/"                    # gh-proxy 镜像
+    "https://ghfast.top/"                      # ghfast 镜像
+    "https://github.moeyy.xyz/"               # moeyy 镜像
+)
+
+# jsDelivr CDN 专用格式: https://cdn.jsdelivr.net/gh/{user}/{repo}@{branch}/{path}
+# 仅适用于 raw.githubusercontent.com 文件下载，不适用于 releases 和 API
+JSDELVR_BASE="https://cdn.jsdelivr.net/gh/${REPO}"
+
+# 判断 URL 是否为 raw 文件（可用 jsDelivr 加速）
+_is_raw_url() {
+    [[ "$1" == *"raw.githubusercontent.com"* ]]
+}
+
+# 判断 URL 是否为 GitHub API / Release（只能用通用代理）
+_is_github_api_or_release() {
+    [[ "$1" == *".github.com/"* ]] && ! _is_raw_url "$1"
+}
+
+# 将 raw.githubusercontent.com URL 转为 jsDelivr CDN URL
+_to_jsdelivr_url() {
+    local url="$1"
+    # https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh
+    # → https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh
+    echo "${url}" | sed -E 's|https?://raw\.githubusercontent\.com/[^/]+/[^/]+/|'"${JSDELVR_BASE}"'@|'
+}
+
+# 获取所有可尝试的 URL 列表（原始 + 各镜像）
+_get_mirror_urls() {
+    local url="$1"
+
+    if _is_raw_url "${url}"; then
+        # raw 文件：jsDelivr 最快最稳定，放第二位（直连之后）
+        printf '%s\n' "${url}"
+        printf '%s\n' "$(_to_jsdelivr_url "${url}")"
+    fi
+
+    # 所有 GitHub URL 都走通用代理链
+    local prefix
+    for prefix in "${MIRROR_PREFIXES[@]}"; do
+        # 跳过空字符串（已在前面处理了原始 URL）
+        [ -z "${prefix}" ] && continue
+        printf '%s\n' "${prefix}${url}"
+    done
+}
+
+# 单次下载尝试（内部用），成功返回 0，失败返回 1
+_download_attempt() {
+    local url="$1"
+    local dest="$2"
+    local timeout="${3:-30}"  # 默认超时 30 秒
+
+    if command -v curl &>/dev/null; then
+        curl -fSL --connect-timeout "${timeout}" --max-time 300 \
+            --progress-bar -o "${dest}" "${url}" 2>/dev/null && return 0
+    elif command -v wget &>/dev/null; then
+        wget --timeout="${timeout}" --progress=bar:force:noscroll \
+            -O "${dest}" "${url}" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+# ═══════════════════════════════════════════════════════
+# 第二部分：依赖检查与安装模块
+# ═══════════════════════════════════════════════════════
+
+# 通过包管理器安装包列表
+install_packages() {
+    local packages=("$@")
+    if [ ${#packages[@]} -eq 0 ]; then return; fi
+
+    local pm
+    pm="$(get_package_manager)"
+
+    case "${pm}" in
+        apt)
+            apt-get update -qq && apt-get install -y -qq "${packages[@]}" ;;
+        dnf)
+            dnf install -y -q "${packages[@]}" ;;
+        yum)
+            yum install -y -q "${packages[@]}" ;;
+        pacman)
+            pacman -S --noconfirm "${packages[@]}" ;;
+        apk)
+            apk add "${packages[@]}" ;;
+        zypper)
+            zypper --non-interactive install "${packages[@]}" ;;
+        brew)
+            brew install "${packages[@]}" ;;
+        *)
+            die "无法自动安装依赖 (${packages[*]})。未知的包管理器，请手动安装后再试" ;;
+    esac
+}
+
+# 确保下载工具可用 (curl/wget)
+ensure_download_tool() {
+    if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
+        info "安装下载工具 (curl)..."
+        install_packages curl || die "无法自动安装 curl/wget，请手动安装后再试"
+        success "curl 已安装"
+    fi
+}
+
+# 确保必要工具存在
+ensure_required_tools() {
+    local missing=()
+
+    for tool in tar gzip; do
+        if ! command -v "${tool}" &>/dev/null; then
+            missing+=("${tool}")
+        fi
+    done
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        info "安装缺失的工具: ${missing[*]}"
+        install_packages "${missing[@]}"
+        success "工具已安装: ${missing[*]}"
+    fi
+}
+
+# 系统资源预检 (磁盘空间 >= 200MB, 内存 >= 256MB)
+check_system_resources() {
+    info "检查系统资源..."
+
+    # 磁盘空间检查 (目标安装路径所在分区)
+    local check_dir="${INSTALL_DIR}"
+    if [ ! -d "${check_dir}" ]; then
+        check_dir="/"
+    fi
+
+    local disk_free_kb
+    disk_free_kb=$(df -k "${check_dir}" 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
+    local disk_free_mb=$((disk_free_kb / 1024))
+
+    if [ "${disk_free_mb}" -lt 200 ]; then
+        warn "磁盘剩余空间不足: ${disk_free_mb}MB < 200MB (建议至少 500MB)"
+        warn "安装可能失败或影响程序正常运行"
+    else
+        success "磁盘空间充足: ${disk_free_mb}MB 可用"
+    fi
+
+    # 内存检查
+    if is_linux && [ -r /proc/meminfo ]; then
+        local mem_total_kb
+        mem_total_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+        local mem_total_mb=$((mem_total_kb / 1024))
+
+        if [ "${mem_total_mb}" -lt 256 ]; then
+            warn "内存较小: ${mem_total_mb}MB < 256MB，可能影响性能"
+        else
+            success "内存充足: ${mem_total_mb}MB 总计"
+        fi
+    fi
+
+    # Docker 容器提示
+    if is_docker; then
+        IN_DOCKER=true
+        warn "检测到 Docker 容器环境 — systemd 服务不可用，将使用前台/后台模式运行"
+    fi
+}
+
+# 端口冲突检测
+check_port_conflict() {
+    local port="${1:-${TARGET_PORT}}"
+
+    info "检查端口 ${port} 占用情况..."
+
+    local occupied=false
+    local occupier=""
+
+    if command -v ss &>/dev/null; then
+        occupier=$(ss -tlnp 2>/dev/null | grep ":${port}" || true)
+    elif command -v netstat &>/dev/null; then
+        occupier=$(netstat -tlnp 2>/dev/null | grep ":${port}" || true)
+    elif command -v lsof &>/dev/null; then
+        occupier=$(lsof -i ":${port}" 2>/dev/null || true)
+    fi
+
+    if [ -n "${occupier}" ]; then
+        occupied=true
+        warn "端口 ${port} 已被占用:"
+        echo "  ${occupier}" | head -3 | sed 's/^/    /'
+        warn "如果端口冲突，Magicmail 可能无法正常启动。可通过 --port 参数指定其他端口"
+    else
+        success "端口 ${port} 可用"
+    fi
+}
+
+# 防火墙状态检测与提示
+check_firewall() {
+    local port="${1:-${TARGET_PORT}}"
+
+    if is_linux; then
+        if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
+            warn "UFW 防火墙已启用，如需外部访问请执行:"
+            echo -e "  ${DIM}sudo ufw allow ${port}/tcp${NC}"
+        fi
+
+        if command -v firewall-cmd &>/dev/null && firewall-cmd --state &>/dev/null; then
+            warn "firewalld 防火墙已启用，如需外部访问请执行:"
+            echo -e "  ${DIM}sudo firewall-cmd --add-port=${port}/tcp --permanent && sudo firewall-cmd --reload${NC}"
+        fi
+
+        if command -v iptables &>/dev/null && iptables -L INPUT -n 2>/dev/null | grep -q "DROP\|REJECT"; then
+            warn "iptables 规则可能限制端口访问，请确认 ${port} 端口已放行"
+        fi
+    fi
+}
+
+# ═══════════════════════════════════════════════════════
+# 第三部分：下载与二进制安装模块
+# ═══════════════════════════════════════════════════════
 
 # 获取下载文件名后缀
 get_binary_suffix() {
@@ -102,9 +435,9 @@ get_binary_suffix() {
     esac
 }
 
-# 获取最新版本号
+# 获取最新版本号（支持镜像自动切换）
 get_latest_version() {
-    # 优先使用本地 git tag（如果是从源码部署）
+    # 优先使用本地 git tag（源码部署场景）
     if command -v git &>/dev/null && [ -d ".git" ] 2>/dev/null; then
         local tag
         tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
@@ -114,81 +447,70 @@ get_latest_version() {
         fi
     fi
 
-    # 从 GitHub API 获取
-    if command -v curl &>/dev/null; then
-        local version
-        version="$(curl -fsSL "${RELEASE_URL}" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/' || true)"
-        if [ -n "${version}" ]; then
-            echo "${version}"
-            return
-        fi
-    elif command -v wget &>/dev/null; then
-        local version
-        version="$(wget -qO- "${RELEASE_URL}" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/' || true)"
-        if [ -n "${version}" ]; then
-            echo "${version}"
-            return
-        fi
-    fi
+    # 从 GitHub API 获取，带镜像自动切换
+    local api_urls
+    api_urls="$(_get_mirror_urls "${RELEASE_URL}")"
 
-    die "无法获取最新版本号，请检查网络连接或手动指定版本"
+    local version=""
+    local api_url
+    while IFS= read -r api_url; do
+        [ -z "${api_url}" ] && continue
+
+        if command -v curl &>/dev/null; then
+            version="$(curl -fsSL --connect-timeout 10 --max-time 30 \
+                "${api_url}" 2>/dev/null \
+                | grep '"tag_name"' | head -1 \
+                | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/' || true)"
+        elif command -v wget &>/dev/null; then
+            version="$(wget --timeout=30 -qO- \
+                "${api_url}" 2>/dev/null \
+                | grep '"tag_name"' | head -1 \
+                | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/' || true)"
+        fi
+
+        if [ -n "${version}" ]; then echo "${version}"; return; fi
+    done <<< "${api_urls}"
+
+    die "无法获取最新版本号，请检查网络连接或手动指定版本 (--version V.x.y.z)
+  提示: 国内用户如遇 GitHub 访问问题，脚本会自动切换镜像代理"
 }
 
-# 下载文件
+# 通用文件下载（自动切换镜像）
 download_file() {
     local url="$1"
     local dest="$2"
 
-    if command -v curl &>/dev/null; then
-        curl -fSL --progress-bar -o "${dest}" "${url}" || die "下载失败: ${url}"
-    elif command -v wget &>/dev/null; then
-        wget --progress=bar:force:noscroll -O "${dest}" "${url}" || die "下载失败: ${url}"
-    else
-        die "需要 curl 或 wget 来下载文件"
-    fi
-}
+    info "正在下载: $(echo "${url}" | sed -E 's|https?://[^/]+/||')"
 
-# ─── 权限检查 ─────────────────────────────────────
-check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        warn "部分操作需要 root 权限，请使用 sudo 运行:"
-        echo "  sudo $0 $*"
-        exit 1
+    # 尝试原始 URL（短超时，快速判断直连是否可用）
+    if _download_attempt "${url}" "${dest}" 10; then
+        success "下载成功 (直连)"
+        return
     fi
-}
 
-# ─── 依赖安装 ─────────────────────────────────────
-ensure_download_tool() {
-    if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
-        info "安装下载工具..."
-        if command -v apt-get &>/dev/null; then
-            apt-get update -qq && apt-get install -y -qq curl
-        elif command -v yum &>/dev/null; then
-            yum install -y -q curl
-        elif command -v dnf &>/dev/null; then
-            dnf install -y -q curl
-        elif command -v pacman &>/dev/null; then
-            pacman -S --noconfirm curl
-        elif command -v apk &>/dev/null; then
-            apk add curl
-        elif command -v brew &>/dev/null; then
-            brew install curl
-        else
-            die "无法自动安装 curl/wget，请手动安装后再试"
+    # 直连失败，尝试镜像
+    warn "直连失败，自动切换镜像加速..."
+
+    local mirror_urls
+    mirror_urls="$(_get_mirror_urls "${url}")"
+
+    local mirror_url
+    while IFS= read -r mirror_url; do
+        # 跳过空行和原始 URL（已试过）
+        [ -z "${mirror_url}" ] && continue
+        [ "${mirror_url}" = "${url}" ] && continue
+
+        info "尝试镜像: ${mirror_url%%://*}..."
+        if _download_attempt "${mirror_url}" "${dest}" 30; then
+            success "下载成功 (${mirror_url%%://*})"
+            return
         fi
-        success "curl 已安装"
-    fi
+    done <<< "${mirror_urls}"
+
+    die "所有镜像均下载失败，请检查网络或手动下载后放置到 ${dest}"
 }
 
-# ─── 目录初始化 ───────────────────────────────────
-init_directories() {
-    mkdir -p "${INSTALL_DIR}"
-    mkdir -p "${DATA_DIR}"
-    mkdir -p "$(dirname "${LOG_FILE}")"
-    success "目录已创建: ${INSTALL_DIR}, ${DATA_DIR}"
-}
-
-# ─── 二进制下载与安装 ─────────────────────────────
+# 下载并安装二进制文件
 install_binary() {
     local target_os="$1"
     local target_arch="$2"
@@ -207,62 +529,118 @@ install_binary() {
 
     chmod +x "${binary_path}"
 
-    # 如果有旧版本，先备份再替换
+    # 备份旧版本
     local final_bin="${INSTALL_DIR}/${BIN_NAME}"
     if [ -f "${final_bin}" ] && [ "${final_bin}" != "${binary_path}" ]; then
-        mv "${final_bin}" "${final_bin}.bak.$(date +%Y%m%d%H%M%S)" || true
+        mv "${final_bin}" "${final_bin}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
     fi
 
-    # 如果 suffix 为空（Linux amd64），不需要 mv；否则创建统一入口
+    # 统一入口处理
     if [ "${suffix}" != "" ]; then
         ln -sf "$(basename "${binary_path}")" "${final_bin}"
     fi
 
     success "二进制已安装: ${final_bin}"
+    echo "${final_bin}"
 }
 
-# ─── Linux systemd 服务 ───────────────────────────
+# 获取已安装的版本号 (从二进制或记录文件)
+get_installed_version() {
+    local bin="${INSTALL_DIR}/${BIN_NAME}"
+    if [ -x "${bin}" ]; then
+        # 尝试从文件名/元数据获取（Go 二进制无 --version 时用备用方案）
+        local ver_file="${INSTALL_DIR}/.version"
+        if [ -f "${ver_file}" ]; then
+            cat "${ver_file}"
+        else
+            echo "installed"
+        fi
+    else
+        echo ""
+    fi
+}
+
+# ═══════════════════════════════════════════════════════
+# 第四部分：目录与权限初始化
+# ═══════════════════════════════════════════════════════
+
+init_directories() {
+    mkdir -p "${INSTALL_DIR}"
+    mkdir -p "${DATA_DIR}/data"
+    mkdir -p "$(dirname "${LOG_FILE}")"
+
+    # 复制部署脚本到安装目录（供 CLI wrapper 使用）
+    cp -f "$0" "${INSTALL_DIR}/deploy.sh" 2>/dev/null || true
+    chmod +x "${INSTALL_DIR}/deploy.sh" 2>/dev/null || true
+
+    success "目录已创建: ${INSTALL_DIR}, ${DATA_DIR}"
+}
+
+# ─── 权限检查 ─────────────────────────────────────
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        error "此操作需要 root 权限，请使用 sudo 运行:"
+        echo -e "  ${DIM}sudo $0 $*${NC}"
+        exit 1
+    fi
+}
+
+# ═══════════════════════════════════════════════════════
+# 第五部分：服务管理模块
+# ═══════════════════════════════════════════════════════
+
+# 创建 Linux systemd 服务文件
 create_systemd_service() {
     local service_file="/etc/systemd/system/${SERVICE_NAME}.service"
 
-    cat > "${service_file}" << EOF
+    cat > "${service_file}" << SERVICEEOF
 [Unit]
 Description=Magicmail Mail Management Service
+Documentation=https://github.com/magiccode1412/magicmail
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 ExecStart=${INSTALL_DIR}/${BIN_NAME}
-WorkingDirectory=${INSTALL_DIR}
+WorkingDirectory=${DATA_DIR}
 Restart=on-failure
 RestartSec=5
-Environment=MAGICMAIL_DSN=${DATA_DIR}/magicmail.db
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
-# 日志输出到文件（也可用 journalctl 查看）
+# 环境变量配置
+Environment=MAGICMAIL_ENV=production
+Environment=MAGICMAIL_PORT=${TARGET_PORT}
+Environment=MAGICMAIL_HOST=0.0.0.0
+Environment=MAGICMAIL_DSN=${DATA_DIR}/data/magicmail.db
+
+# 日志输出
 StandardOutput=append:${LOG_FILE}
 StandardError=append:${LOG_FILE}
 
-# 安全限制
+# 安全加固
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=${DATA_DIR} ${INSTALL_DIR}
+ProtectHome=true
+ReadWritePaths=${DATA_DIR}
 PrivateTmp=true
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SERVICEEOF
 
     systemctl daemon-reload
     systemctl enable "${SERVICE_NAME}"
     success "systemd 服务已创建: ${service_file}"
 }
 
-# ─── macOS LaunchDaemon 服务 ─────────────────────
+# 创建 macOS LaunchDaemon 服务
 create_launchd_service() {
     local plist_file="/Library/LaunchDaemons/com.magicmail.service.plist"
 
-    cat > "${plist_file}" << EOF
+    cat > "${plist_file}" << PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -275,7 +653,7 @@ create_launchd_service() {
         <string>${INSTALL_DIR}/${BIN_NAME}</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>${INSTALL_DIR}</string>
+    <string>${DATA_DIR}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -286,45 +664,83 @@ create_launchd_service() {
     <string>${LOG_FILE}</string>
     <key>EnvironmentVariables</key>
     <dict>
+        <key>MAGICMAIL_ENV</key>
+        <string>production</string>
+        <key>MAGICMAIL_PORT</key>
+        <string>${TARGET_PORT}</string>
+        <key>MAGICMAIL_HOST</key>
+        <string>0.0.0.0</string>
         <key>MAGICMAIL_DSN</key>
-        <string>${DATA_DIR}/magicmail.db</string>
+        <string>${DATA_DIR}/data/magicmail.db</string>
     </dict>
 </dict>
 </plist>
-EOF
+PLISTEOF
 
     launchctl load "${plist_file}" 2>/dev/null || true
     success "LaunchDaemon 服务已创建: ${plist_file}"
 }
 
-# ─── 服务管理函数 ─────────────────────────────────
+# 启动服务
 svc_start() {
     check_root start
+
+    if is_docker; then
+        # Docker 内直接后台运行
+        if pgrep -f "${INSTALL_DIR}/${BIN_NAME}" &>/dev/null; then
+            warn "进程已在运行中"
+        else
+            cd "${DATA_DIR}" && MAGICMAIL_ENV=production MAGICMAIL_PORT="${TARGET_PORT}" \
+                nohup "${INSTALL_DIR}/${BIN_NAME}" >> "${LOG_FILE}" 2>&1 &
+            sleep 1
+            success "已在 Docker 中启动 (PID: $!)"
+        fi
+        svc_status
+        return
+    fi
+
     if is_linux; then
         systemctl start "${SERVICE_NAME}" || die "启动失败"
         sleep 1
-        svc_status
     else
         launchctl start "com.magicmail.service" 2>/dev/null \
-            || "${INSTALL_DIR}/${BIN_NAME}" &
+            || (cd "${DATA_DIR}" && "${INSTALL_DIR}/${BIN_NAME}" &)
         sleep 1
-        svc_status
     fi
+    svc_status
     success "服务已启动"
 }
 
+# 停止服务
 svc_stop() {
     check_root stop
+
+    if is_docker; then
+        pkill -f "${INSTALL_DIR}/${BIN_NAME}" 2>/dev/null || true
+        success "Docker 进程已停止"
+        return
+    fi
+
     if is_linux; then
-        systemctl stop "${SERVICE_NAME}" || warn "服务可能未在运行"
+        systemctl stop "${SERVICE_NAME}" 2>/dev/null || warn "服务可能未在运行"
     else
-        launchctl stop "com.magicmail.service" 2>/dev/null || pkill -f "${INSTALL_DIR}/${BIN_NAME}" || true
+        launchctl stop "com.magicmail.service" 2>/dev/null \
+            || pkill -f "${INSTALL_DIR}/${BIN_NAME}" 2>/dev/null || true
     fi
     success "服务已停止"
 }
 
+# 重启服务
 svc_restart() {
     check_root restart
+
+    if is_docker; then
+        svc_stop
+        sleep 1
+        svc_start
+        return
+    fi
+
     if is_linux; then
         systemctl restart "${SERVICE_NAME}" || die "重启失败"
     else
@@ -335,248 +751,807 @@ svc_restart() {
     success "服务已重启"
 }
 
+# 服务状态查看
 svc_status() {
-    if is_linux; then
+    local running=false
+
+    if is_linux && ! is_docker; then
         if systemctl is-active "${SERVICE_NAME}" &>/dev/null; then
+            running=true
             echo -e "${GREEN}● 服务状态: 运行中${NC}"
-            systemctl status "${SERVICE_NAME}" --no-pager -l 2>/dev/null | head -15
+            systemctl status "${SERVICE_NAME}" --no-pager -l 2>/dev/null | head -12
+        else
+            echo -e "${RED}○ 服务状态: 未运行${NC}"
+            # 显示失败原因
+            systemctl status "${SERVICE_NAME}" --no-pager -l 2>/dev/null | grep -E "Active:|Main PID:" | head -3 | sed 's/^/  /'
+        fi
+    elif is_docker; then
+        if pgrep -f "${INSTALL_DIR}/${BIN_NAME}" &>/dev/null; then
+            running=true
+            echo -e "${GREEN}● 服务状态: 运行中 (Docker模式)${NC}"
+            ps aux | grep "[${BIN_NAME:0:1}]${BIN_NAME:1}" | head -3 | sed 's/^/  /'
         else
             echo -e "${RED}○ 服务状态: 未运行${NC}"
         fi
     else
         if pgrep -f "${INSTALL_DIR}/${BIN_NAME}" &>/dev/null; then
+            running=true
             echo -e "${GREEN}● 服务状态: 运行中${NC}"
-            ps aux | grep "[${BIN_NAME:0:1}]${BIN_NAME:1}" | head -5
+            ps aux | grep "[${BIN_NAME:0:1}]${BIN_NAME:1}" | head -5 | sed 's/^/  /'
         else
             echo -e "${RED}○ 服务状态: 未运行${NC}"
         fi
     fi
 
-    # 端口检测
+    echo ""
+
+    # 端口监听信息
+    local listen_port="${TARGET_PORT}"
+    local port_info=""
+
     if command -v ss &>/dev/null; then
-        local port_info
-        port_info="$(ss -tlnp 2>/dev/null | grep ':8080' || true)"
-        if [ -n "${port_info}" ]; then
-            echo ""
-            info "端口监听: 8080"
-        fi
+        port_info="$(ss -tlnp 2>/dev/null | grep ":${listen_port}" || true)"
+    elif command -v netstat &>/dev/null; then
+        port_info="$(netstat -tlnp 2>/dev/null | grep ":${listen_port}" || true)"
     elif command -v lsof &>/dev/null; then
-        if lsof -i :8080 &>/dev/null; then
-            echo ""
-            info "端口监听: 8080"
+        if lsof -i ":${listen_port}" &>/dev/null; then
+            port_info="(listening)"
         fi
     fi
 
+    if [ -n "${port_info}" ] || ${running}; then
+        info "端口监听: ${listen_port}"
+    else
+        warn "端口 ${listen_port}: 未监听"
+    fi
+
+    # 关键路径信息
     echo ""
-    info "访问地址: http://localhost:8080"
+    info "访问地址: http://localhost:${listen_port}"
     info "数据目录: ${DATA_DIR}"
     info "日志文件: ${LOG_FILE}"
+    info "配置目录: ${CONFIG_DIR}"
+
+    # 版本信息
+    local installed_ver
+    installed_ver="$(get_installed_version 2>/dev/null || echo '?')"
+    if [ -n "${installed_ver}" ]; then
+        info "已装版本: ${installed_ver}"
+    fi
 }
 
+# 查看日志
 svc_logs() {
+    local lines="${1:-100}"
+
     if [ -f "${LOG_FILE}" ]; then
-        tail -100 "${LOG_FILE}" 2>/dev/null || warn "无法读取日志"
-    elif is_linux; then
-        journalctl -u "${SERVICE_NAME}" --no-pager -n 100 2>/dev/null || warn "无日志可读"
+        tail -"${lines}" "${LOG_FILE}" 2>/dev/null || warn "无法读取日志"
+    elif is_linux && ! is_docker; then
+        journalctl -u "${SERVICE_NAME}" --no-pager -n "${lines}" 2>/dev/null \
+            || warn "无日志可读 (journalctl)"
     else
         warn "日志文件不存在: ${LOG_FILE}"
     fi
 }
 
-is_linux() { [[ "$(uname -s)" == Linux* ]]; }
+# ═══════════════════════════════════════════════════════
+# 第六部分：CLI Wrapper 生成模块
+# ═══════════════════════════════════════════════════════
 
-# ─── 主安装流程 ───────────────────────────────────
+# 创建 /usr/local/bin/magicmail CLI 命令
+create_cli_wrapper() {
+    local wrapper="${CLI_BIN}"
+
+    cat > "${wrapper}" << WRAPPEREOF
+#!/usr/bin/env bash
+# ============================================================================
+# Magicmail CLI - 由 deploy.sh install 自动生成
+# 用法: magicmail [命令] [选项]
+# ============================================================================
+set -euo pipefail
+
+# ─── 配置 ──────────────────────────────────────────
+MAGICMAIL_INSTALL_DIR="${INSTALL_DIR}"
+MAGICMAIL_DATA_DIR="${DATA_DIR}"
+MAGICMAIL_LOG_FILE="${LOG_FILE}"
+MAGICMAIL_SERVICE="${SERVICE_NAME}"
+DEPLOY_SCRIPT="\${MAGICMAIL_INSTALL_DIR}/deploy.sh"
+
+RED='\\033[0;31m'; GREEN='\\033[0;32m'; YELLOW='\\033[1;33m'
+BLUE='\\033[0;34m'; CYAN='\\033[0;36m'; BOLD='\\033[1m'; NC='\\033[0m'
+
+info()  { echo -e "\${BLUE}[INFO]\${NC}  \$*"; }
+ok()    { echo -e "\${GREEN}[OK]\${NC}    \$*"; }
+warn()  { echo -e "\${YELLOW}[WARN]\${NC}  \$*"; }
+error() { echo -e "\${RED}[ERROR]\${NC} \$*" >&2; }
+
+show_help() {
+    echo ""
+    echo -e "\${CYAN}\${BOLD}Magicmail 邮件管理系统 - 命令行工具\${NC}"
+    echo ""
+    echo "用法: magicmail <命令> [选项]"
+    echo ""
+    echo "命令:"
+    echo "  status       查看服务运行状态"
+    echo "  start        启动服务"
+    echo "  stop         停止服务"
+    echo "  restart      重启服务"
+    echo "  update       更新到最新版本"
+    echo "  logs [N]     查看最近 N 行日志 (默认100)"
+    echo "  version      显示版本信息"
+    echo "  doctor       环境健康自检"
+    echo "  uninstall    卸载程序"
+    echo "  help, -h     显示此帮助"
+    echo ""
+    echo "选项:"
+    echo "  -y, --yes    跳过确认提示"
+    echo ""
+    echo "示例:"
+    echo "  magicmail status          # 查看状态"
+    echo "  magicmail logs 50         # 查看50行日志"
+    echo "  magicmail update -y       # 无交互更新"
+    echo ""
+    echo "更多信息: \${MAGICMAIL_INSTALL_DIR}/deploy.sh help"
+}
+
+# 需要 root 的命令列表
+needs_root() { [[ " start stop restart update uninstall " == *" $1 "* ]]; }
+
+# 主路由
+cmd="\${1:-help}"
+shift 2>/dev/null || true
+
+case "\${cmd}" in
+    status)
+        if [[ \$EUID -ne 0 ]] && needs_root "start"; then
+            sudo "\$0" status "\$@"
+        else
+            exec "\${DEPLOY_SCRIPT}" status "\$@"
+        fi
+        ;;
+    start|stop|restart|update|uninstall)
+        if [[ \$EUID -ne 0 ]]; then
+            echo -e "\${YELLOW}需要 root 权限，正在使用 sudo...\${NC}"
+            exec sudo "\$0" "\${cmd}" "\$@"
+        else
+            exec "\${DEPLOY_SCRIPT}" "\${cmd}" "\$@"
+        fi
+        ;;
+    logs)
+        lines="\${1:-100}"
+        if [[ \$EUID -ne 0 ]]; then
+            sudo "\$0" logs "\${lines}"
+        else
+            exec "\${DEPLOY_SCRIPT}" logs "\${lines}"
+        fi
+        ;;
+    version)
+        local bin="\${MAGICMAIL_INSTALL_DIR}/magicmail"
+        if [ -x "\${bin}" ]; then
+            echo -e "\${CYAN}\${BOLD}Magicmail\${NC}"
+            echo "  安装路径: \${bin}"
+            echo "  数据目录: \${MAGICMAIL_DATA_DIR}"
+            echo "  日志文件: \${MAGICMAIL_LOG_FILE}"
+            if [ -f "\${MAGICMAIL_INSTALL_DIR}/.version" ]; then
+                echo "  版本信息: \$(cat \${MAGICMAIL_INSTALL_DIR}/.version)"
+            fi
+            echo "  服务名称: \${MAGICMAIL_SERVICE}"
+        else
+            error "Magicmail 未安装。请先执行: sudo ./deploy.sh install"
+            exit 1
+        fi
+        ;;
+    doctor)
+        exec "\${DEPLOY_SCRIPT}" doctor "\$@"
+        ;;
+    help|--help|-h|"")
+        show_help
+        ;;
+    *)
+        error "未知命令: \${cmd}"
+        echo "使用 'magicmail help' 查看帮助"
+        exit 1
+        ;;
+esac
+WRAPPEREOF
+
+    chmod +x "${wrapper}"
+    success "CLI 命令已注册: ${wrapper}"
+}
+
+# 移除 CLI wrapper
+remove_cli_wrapper() {
+    if [ -L "${CLI_BIN}" ] || [ -f "${CLI_BIN}" ]; then
+        # 如果是本脚本生成的 wrapper 则移除
+        if head -5 "${CLI_BIN}" 2>/dev/null | grep -q "由 deploy.sh install 自动生成"; then
+            rm -f "${CLI_BIN}"
+            info "CLI 命令已移除: ${CLI_BIN}"
+        else
+            warn "${CLI_BIN} 不是由 deploy.sh 创建，跳过删除"
+        fi
+    fi
+}
+
+# ═══════════════════════════════════════════════════════
+# 第七部分：主流程命令
+# ═══════════════════════════════════════════════════════
+
+# ─── 安装 ───────────────────────────────────────────
 cmd_install() {
     check_root install
     print_banner
 
     # 1. 环境检测
-    local target_os target_arch
-    target_os="$(detect_os)"
-    target_arch="$(detect_arch)"
+    TARGET_OS="$(detect_os)"
+    TARGET_ARCH="$(detect_arch)"
 
-    if [ "${target_os}" == "windows" ]; then
+    if [ "${TARGET_OS}" == "windows" ]; then
         die "Windows 不支持此脚本，请直接从 GitHub Release 下载 exe 文件运行"
     fi
 
-    info "目标平台: ${target_os}/${target_arch}"
+    local distro
+    distro="$(detect_distro)"
+    info "操作系统: $(uname -s) (${distro})"
+    info "CPU 架构: $(uname -m) → ${TARGET_ARCH}"
+    info "目标端口:  ${TARGET_PORT}"
 
-    # 2. 安装依赖
+    # 2. 系统资源预检
+    check_system_resources
+
+    # 3. 端口占用检查
+    check_port_conflict "${TARGET_PORT}"
+
+    # 4. 防火墙提示
+    check_firewall "${TARGET_PORT}"
+
+    # 5. 安装依赖工具
     ensure_download_tool
+    ensure_required_tools
 
-    # 3. 创建目录
+    # 6. 初始化目录
     init_directories
 
-    # 4. 获取版本并下载
-    local version
-    version="$(get_latest_version)"
-    info "最新版本: ${version}"
+    # 7. 获取版本并下载
+    local version="${TARGET_VERSION}"
+    if [ -z "${version}" ]; then
+        version="$(get_latest_version)"
+    fi
+    info "目标版本: ${version}"
 
-    install_binary "${target_os}" "${target_arch}" "${version}"
+    local final_bin
+    final_bin="$(install_binary "${TARGET_OS}" "${TARGET_ARCH}" "${version}")"
 
-    # 5. 验证安装
-    local bin_path="${INSTALL_DIR}/${BIN_NAME}"
-    if [ ! -x "${bin_path}" ]; then
-        # 可能是带后缀的文件
-        for f in "${bin_path}".exe "${bin_path}-"*; do
-            if [ -x "${f}" ]; then
-                bin_path="${f}"
-                break
-            fi
-        done
+    # 记录版本号
+    echo "${version}" > "${INSTALL_DIR}/.version"
+
+    # 8. 验证二进制
+    info "验证二进制文件..."
+    if [ -x "${final_bin}" ]; then
+        # Go 编译的二进制无 --version 参数时通过 file 命令验证
+        local file_type
+        file_type="$(file "${final_bin}" 2>/dev/null | head -1 || echo '')"
+        if echo "${file_type}" | grep -qiE "executable|ELF|Mach-O"; then
+            success "二进制验证通过: ${file_type}"
+        else
+            warn "二进制文件异常: ${file_type}"
+        fi
     fi
 
-    if ! "${bin_path}" --version 2>&1 || true; then
-        info "（--version 参数暂不可用，跳过验证）"
-    fi
-
-    # 6. 创建服务管理
-    if is_linux; then
+    # 9. 创建服务管理
+    if is_docker; then
+        info "Docker 环境 — 跳过系统服务创建"
+    elif is_linux; then
         create_systemd_service
     else
         create_launchd_service
     fi
 
-    # 7. 启动服务
+    # 10. 注册全局命令
+    create_cli_wrapper
+
+    # 11. 启动服务
     echo ""
     info "正在启动服务..."
-    if is_linux; then
+    if is_docker; then
+        cd "${DATA_DIR}" && MAGICMAIL_ENV=production MAGICMAIL_PORT="${TARGET_PORT}" \
+            nohup "${final_bin}" >> "${LOG_FILE}" 2>&1 &
+        sleep 2
+    elif is_linux; then
         systemctl start "${SERVICE_NAME}"
         sleep 2
     else
-        "${bin_path}" &
+        launchctl start "com.magicmail.service" 2>/dev/null || true
         sleep 2
     fi
 
-    # 8. 显示结果
-    echo ""
-    echo -e "${GREEN}═══════════════════════════════════════${NC}"
-    echo -e "  ${GREEN}✅ Magicmail 安装成功！${NC}"
-    echo ""
-    echo -e "  访问地址: ${CYAN}http://localhost:8080${NC}"
-    echo -e "  数据目录: ${CYAN}${DATA_DIR}${NC}"
-    echo -e "  日志文件: ${CYAN}${LOG_FILE}${NC}"
-    echo -e "  二进制:   ${CYAN}${bin_path}${NC}"
-    echo ""
-    if is_linux; then
-        echo -e "  常用命令:"
-        echo -e "    sudo $0 restart   重启服务"
-        echo -e "    sudo $0 status    查看状态"
-        echo -e "    sudo $0 logs      查看日志"
-        echo -e "    sudo $0 stop      停止服务"
-        echo -e "    sudo $0 update    更新版本"
-    fi
-    echo -e "${GREEN}═══════════════════════════════════════${NC}"
-
-    # 9. 自动打开浏览器（如果可能）
-    if command -v xdg-open &>/dev/null; then
-        (sleep 1 && xdg-open "http://localhost:8080" &) 2>/dev/null || true
-    elif command -v open &>/dev/null; then
-        (sleep 1 && open "http://localhost:8080") 2>/dev/null || true
-    fi
+    # 12. 输出汇总信息
+    print_summary "install" "${version}"
 }
 
-# ─── 更新 ─────────────────────────────────────────
+# ─── 更新 ───────────────────────────────────────────
 cmd_update() {
     check_root update
     print_banner
     info "检查更新..."
 
-    local target_os target_arch new_version
-    target_os="$(detect_os)"
-    target_arch="$(detect_arch)"
-    new_version="$(get_latest_version)"
+    local new_version
+    if [ -n "${TARGET_VERSION}" ]; then
+        new_version="${TARGET_VERSION}"
+    else
+        new_version="$(get_latest_version)"
+    fi
 
+    local current_version
+    current_version="$(get_installed_version || echo "unknown")"
+
+    info "当前版本: ${current_version}"
     info "最新版本: ${new_version}"
 
-    # 获取当前运行的版本（如果有）
-    local current_version=""
-    if [ -f "${INSTALL_DIR}/${BIN_NAME}" ]; then
-        current_version="$("${INSTALL_DIR}/${BIN_NAME}" --version 2>/dev/null || echo "unknown")"
-        info "当前版本: ${current_version}"
-    fi
-
-    if [ "${current_version:-unknown}" = "${new_version}" ]; then
+    if [ "${current_version}" = "${new_version}" ]; then
         success "当前已是最新版本 (${new_version})"
+        print_summary "update" "${new_version}"
         return
     fi
 
-    warn "即将从 ${current_version:-未知} 更新至 ${new_version}"
-    read -rp "确认继续? [Y/n] " confirm
-    if [[ "${confirm:-Y}" =~ ^[Nn]$ ]]; then
-        info "已取消"
-        return
+    # 确认操作
+    if ${INTERACTIVE}; then
+        warn "即将从 ${current_version} 更新至 ${new_version}"
+        read -rp "确认继续? [Y/n] " confirm
+        if [[ "${confirm:-Y}" =~ ^[Nn]$ ]]; then
+            info "已取消更新"
+            return
+        fi
     fi
 
-    # 先停止服务
-    svc_stop
+    # 执行更新
+    svc_stop 2>/dev/null || true
+    sleep 1
 
-    # 下载新版
-    install_binary "${target_os}" "${target_arch}" "${new_version}"
+    install_binary "${TARGET_OS:-$(detect_os)}" "${TARGET_ARCH:-$(detect_arch)}" "${new_version}"
+    echo "${new_version}" > "${INSTALL_DIR}/.version"
 
-    # 重启服务
-    svc_start
+    svc_start 2>/dev/null || true
 
-    success "更新完成 → ${new_version}"
+    print_summary "update" "${new_version}"
 }
 
-# ─── 卸载 ─────────────────────────────────────────
+# ─── 卸载 ───────────────────────────────────────────
 cmd_uninstall() {
     check_root uninstall
     print_banner
 
-    warn "以下操作将卸载 Magicmail 服务"
+    warn "即将卸载 Magicmail 服务"
     echo ""
-    echo "  数据目录: ${DATA_DIR} （包含数据库和配置）"
+    echo "  程序目录: ${INSTALL_DIR}"
+    echo "  数据目录: ${DATA_DIR} （包含数据库和附件）"
+    echo "  CLI 命令: ${CLI_BIN}"
     echo ""
 
-    read -rp "是否同时删除数据? [y/N] " delete_data
-    read -rp "确认卸载? [y/N] " confirm
+    local delete_data="n"
+    local confirm="n"
 
-    if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
-        info "已取消卸载"
-        return
+    if ${INTERACTIVE}; then
+        read -rp "是否同时删除数据(数据库/附件)? [y/N] " delete_data
+        read -rp "确认卸载 Magicmail? [y/N] " confirm
+
+        if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
+            info "已取消卸载"
+            return
+        fi
+    else
+        info "非交互模式：仅卸载程序，保留数据"
     fi
 
-    # 停止服务
+    # 1. 停止服务
     svc_stop 2>/dev/null || true
     sleep 1
 
-    # 移除 systemd / LaunchDaemon
-    if is_linux && [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
+    # 2. 移除系统服务
+    if is_linux && ! is_docker && [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
         systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
         rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
         systemctl daemon-reload
-        info "systemd 服务已移除"
+        ok "systemd 服务已移除"
     fi
 
     if [ -f "/Library/LaunchDaemons/com.magicmail.service.plist" ]; then
         launchctl unload "/Library/LaunchDaemons/com.magicmail.service.plist" 2>/dev/null || true
         rm -f "/Library/LaunchDaemons/com.magicmail.service.plist"
-        info "LaunchDaemon 已移除"
+        ok "LaunchDaemon 已移除"
     fi
 
-    # 删除二进制
-    rm -rf "${INSTALL_DIR}"
-    info "程序文件已删除"
+    # 3. 移除 CLI 命令
+    remove_cli_wrapper
 
-    # 可选：删除数据
+    # 4. 删除程序文件
+    rm -rf "${INSTALL_DIR}"
+    ok "程序文件已删除"
+
+    # 5. 可选删除数据
     if [[ "${delete_data}" =~ ^[Yy]$ ]]; then
         rm -rf "${DATA_DIR}"
         rm -f "${LOG_FILE}"
-        info "数据和日志已删除"
+        ok "数据和日志已删除"
     else
-        info "数据已保留于: ${DATA_DIR}"
+        info "数据已保留: ${DATA_DIR}"
+        info "如需彻底清理请执行: sudo rm -rf ${DATA_DIR}"
     fi
 
-    success "Magicmail 已卸载"
+    print_summary "uninstall" ""
 }
 
-# ─── 入口 ─────────────────────────────────────────
-main() {
-    local cmd="${1:-install}"
-    shift 2>/dev/null || true
+# ─── 自检 ───────────────────────────────────────────
+cmd_doctor() {
+    print_banner
+    echo -e "${BOLD}环境健康自检${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+    local all_ok=true
+    local total_checks=0
+    local passed_checks=0
+
+    # 辅助函数
+    check_item() {
+        local label="$1"
+        shift
+        total_checks=$((total_checks + 1))
+
+        if "$@"; then
+            passed_checks=$((passed_checks + 1))
+            printf "  ${GREEN}✔ %-35s %s${NC}\n" "${label}" "正常"
+        else
+            all_ok=false
+            printf "  ${RED}✘ %-35s %s${NC}\n" "${label}" "异常"
+        fi
+    }
+
+    warn_item() {
+        local label="$1"
+        local msg="$2"
+        total_checks=$((total_checks + 1))
+        printf "  ${YELLOW}⚠ %-35s %s${NC}\n" "${label}" "${msg}"
+    }
+
+    echo ""
+    echo -e "${BOLD}[系统环境]${NC}"
+
+    check_item "操作系统" true
+    check_item "内核版本" true
+    info "  内核: $(uname -sr), 发行版: $(detect_distro)"
+    check_item "CPU 架构" true
+    info "  架构: $(uname -m) → $(detect_arch)"
+
+    echo ""
+    echo -e "${BOLD}[程序文件]${NC}"
+
+    check_item "二进制文件" [ -x "${INSTALL_DIR}/${BIN_NAME}" ]
+    if [ -x "${INSTALL_DIR}/${BIN_NAME}" ]; then
+        local fsize
+        fsize=$(ls -lh "${INSTALL_DIR}/${BIN_NAME}" 2>/dev/null | awk '{print $5}')
+        info "  大小: ${fsize}, 路径: ${INSTALL_DIR}/${BIN_NAME}"
+    fi
+
+    check_item "部署脚本" [ -f "${INSTALL_DIR}/deploy.sh" ]
+    check_item "版本记录" [ -f "${INSTALL_DIR}/.version" ] && info "  版本: $(cat "${INSTALL_DIR}/.version" 2>/dev/null || echo '?')"
+
+    echo ""
+    echo -e "${BOLD}[数据目录]${NC}"
+
+    check_item "数据主目录" [ -d "${DATA_DIR}" ]
+    check_item "数据库文件" [ -f "${DATA_DIR}/data/magicmail.db" ]
+
+    if [ -f "${DATA_DIR}/data/magicmail.db" ]; then
+        local db_size
+        db_size=$(ls -lh "${DATA_DIR}/data/magicmail.db" 2>/dev/null | awk '{print $5}')
+        info "  DB 大小: ${db_size}"
+    fi
+
+    check_item "日志文件" [ -f "${LOG_FILE}" ]
+
+    echo ""
+    echo -e "${BOLD}[服务状态]${NC}"
+
+    local svc_running=false
+    if is_docker; then
+        if pgrep -f "${INSTALL_DIR}/${BIN_NAME}" &>/dev/null; then
+            svc_running=true
+            check_item "Docker 进程" true
+        else
+            check_item "Docker 进程" false
+        fi
+    elif is_linux && [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
+        check_item "systemd 服务文件" true
+        if systemctl is-active "${SERVICE_NAME}" &>/dev/null; then
+            svc_running=true
+            check_item "systemd 运行状态" true
+        else
+            check_item "systemd 运行状态" false
+            local state
+            state=$(systemctl is-failed "${SERVICE_NAME}" 2>/dev/null || echo "unknown")
+            info "  状态详情: ${state}"
+        fi
+    else
+        check_item "系统服务" false
+        info "  提示: 未找到服务定义，可能未完整安装"
+    fi
+
+    echo ""
+    echo -e "${BOLD}[网络与端口]${NC}"
+
+    check_item "网络连通性" true
+    # 简单的网络测试
+    if ping -c 1 -W 2 8.8.8.8 &>/dev/null || ping -c 1 -W 2 223.5.5.5 &>/dev/null; then
+        : # pass
+    else
+        warn_item "外网连接" "无法连接 DNS (可能是离线环境)"
+    fi
+
+    local port_info=""
+    local target_p="${TARGET_PORT}"
+    if command -v ss &>/dev/null; then
+        port_info=$(ss -tlnp 2>/dev/null | grep ":${target_p}" || true)
+    elif command -v netstat &>/dev/null; then
+        port_info=$(netstat -tlnp 2>/dev/null | grep ":${target_p}" || true)
+    fi
+
+    if [ -n "${port_info}" ]; then
+        check_item "端口 ${target_p} 监听" ${svc_running}
+    else
+        if ${svc_running}; then
+            warn_item "端口 ${target_p} 监听" "服务运行但端口未监听，可能启动失败"
+        else
+            check_item "端口 ${target_p} 监听" false
+        fi
+    fi
+
+    echo ""
+    echo -e "${BOLD}[CLI 命令]${NC}"
+
+    check_item "magicmail 命令" [ -x "${CLI_BIN}" ]
+    if [ -x "${CLI_BIN}" ]; then
+        info "  路径: ${CLI_BIN}"
+    fi
+
+    check_item "curl/wget" command -v curl &>/dev/null || command -v wget &>/dev/null
+
+    echo ""
+    echo -e "${BOLD}[资源状态]${NC}"
+
+    local df_kb
+    df_kb=$(df -k "${DATA_DIR:-/}" 2>/dev/null | awk 'NR==2{print $4}' || echo "0")
+    local df_mb=$((df_kb / 1024))
+    if [ "${df_mb}" -ge 200 ]; then
+        check_item "磁盘空间 (>=200MB)" true
+        info "  可用: ~${df_mb} MB"
+    else
+        check_item "磁盘空间 (>=200MB)" false
+        info "  仅剩: ~${df_mb} MB"
+    fi
+
+    if is_linux && [ -r /proc/meminfo ]; then
+        local mem_mb
+        mem_mb=$(awk '/MemTotal/{printf "%.0f", $2/1024}' /proc/meminfo 2>/dev/null || echo "0")
+        if [ "${mem_mb}" -ge 256 ]; then
+            check_item "内存 (>=256MB)" true
+            info "  总计: ~${mem_mb} MB"
+        else
+            check_item "内存 (>=256MB)" false
+            info "  仅: ~${mem_mb} MB"
+        fi
+    fi
+
+    # ─── 汇总 ─────────────────────────────────────
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    if ${all_ok}; then
+        echo -e "  ${GREEN}全部通过! ${passed_checks}/${total_checks} 项检查正常${NC}"
+    else
+        local failed=$((total_checks - passed_checks))
+        echo -e "  ${YELLOW}部分问题: ${passed_checks}/${total_checks} 通过, ${failed} 项需关注${NC}"
+        echo ""
+        echo "  建议:"
+        echo "  - 如服务未运行: ${CYAN}sudo magicmail start${NC}"
+        echo "  - 如缺少文件:   ${CYAN}sudo ./deploy.sh install${NC}"
+        echo "  - 如端口未监听: 检查日志: ${CYAN}sudo magicmail logs${NC}"
+    fi
+
+    echo ""
+}
+
+# ─── 版本信息 ───────────────────────────────────────
+cmd_version() {
+    local installed_ver
+    installed_ver="$(get_installed_version || echo '未安装')"
+    local latest_ver=""
+
+    echo ""
+    echo -e "${CYAN}${BOLD}Magicmail 版本信息${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  已安装版本:  ${installed_ver}"
+
+    # 尝试获取远程最新版（可选，失败不阻塞）
+    if command -v curl &>/dev/null || command -v wget &>/dev/null; then
+        latest_ver="$(get_latest_version 2>/dev/null || true)"
+        if [ -n "${latest_ver}" ]; then
+            if [ "${installed_ver}" = "${latest_ver}" ]; then
+                echo "  最新版本:    ${latest_ver} ${GREEN}(已是最新)${NC}"
+            else
+                echo "  最新版本:    ${latest_ver} ${YELLOW}(可升级)${NC}"
+            fi
+        else
+            echo "  最新版本:    (无法获取，请检查网络)"
+        fi
+    fi
+
+    echo ""
+    echo "  安装位置:    ${INSTALL_DIR}/${BIN_NAME}"
+    echo "  数据目录:    ${DATA_DIR}"
+    echo "  日志文件:    ${LOG_FILE}"
+    echo "  CLI 命令:    ${CLI_BIN}"
+    echo "  系统服务:    ${SERVICE_NAME}"
+    echo "  目标平台:    $(detect_os)/$(detect_arch)"
+    echo "  发行版:      $(detect_distro)"
+    echo "  包管理器:    $(get_package_manager)"
+    echo "  Docker 环境: $(is_docker && echo '是' || echo '否')"
+    echo ""
+}
+
+# ═══════════════════════════════════════════════════════
+# 第八部分：统一汇总输出
+# ═══════════════════════════════════════════════════════
+
+# 统一的信息汇总输出
+print_summary() {
+    local action="$1"
+    local version="${2:-$(get_installed_version || echo '?')}"
+
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
+
+    case "${action}" in
+        install)
+            echo -e "  ${GREEN}${BOLD}✅ Magicmail 安装成功！${NC}"
+            echo ""
+            echo -e "  版本信息:  ${CYAN}${version}${NC}"
+            echo -e "  访问地址:  ${CYAN}http://localhost:${TARGET_PORT}${NC}"
+            echo -e "  数据目录:  ${CYAN}${DATA_DIR}${NC}"
+            echo -e "  日志文件:  ${CYAN}${LOG_FILE}${NC}"
+            echo -e "  二进制:    ${CYAN}${INSTALL_DIR}/${BIN_NAME}${NC}"
+            echo -e "  CLI 命令:  ${CYAN}${CLI_BIN}${NC}"
+            echo ""
+            echo -e "  ${BOLD}常用命令:${NC}"
+            echo -e "  ${DIM}  magicmail status${NC}     查看服务状态"
+            echo -e "  ${DIM}  magicmail logs${NC}       查看运行日志"
+            echo -e "  ${DIM}  magicmail restart${NC}    重启服务"
+            echo -e "  ${DIM}  magicmail update${NC}     更新到最新版"
+            echo -e "  ${DIM}  magicmail doctor${NC}     环境健康自检"
+            echo -e "  ${DIM}  magicmail uninstall${NC}  卸载程序"
+            ;;
+
+        update)
+            echo -e "  ${GREEN}${BOLD}🔄 Magicmail 更新完成！${NC}"
+            echo ""
+            echo -e "  当前版本:  ${CYAN}${version}${NC}"
+            echo -e "  访问地址:  ${CYAN}http://localhost:${TARGET_PORT}${NC}"
+            echo ""
+            echo -e "  使用 ${CYAN}magicmail status${NC} 确认服务运行正常"
+            ;;
+
+        uninstall)
+            echo -e "  ${YELLOW}${BOLD}🗑️  Magicmail 已卸载${NC}"
+            echo ""
+            echo -e "  程序文件已从 ${INSTALL_DIR} 移除"
+            echo -e "  CLI 命令已从 ${CLI_BIN} 移除"
+            echo ""
+            echo -e "  如需重新安装: ${CYAN}./deploy.sh install${NC}"
+            ;;
+
+        *)
+            echo -e "  操作完成: ${action}"
+            ;;
+    esac
+
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
+    echo ""
+
+    # 自动打开浏览器（仅 install 且有桌面环境）
+    if [ "${action}" = "install" ]; then
+        if command -v xdg-open &>/dev/null; then
+            (sleep 1 && xdg-open "http://localhost:${TARGET_PORT}" &) 2>/dev/null || true
+        elif command -v open &>/dev/null; then
+            (sleep 1 && open "http://localhost:${TARGET_PORT}" &) 2>/dev/null || true
+        fi
+    fi
+}
+
+# ═══════════════════════════════════════════════════════
+# 第九部分：入口与参数解析
+# ═══════════════════════════════════════════════════════
+
+show_help() {
+    echo ""
+    echo -e "${CYAN}${BOLD}Magicmail 一键部署工具${NC}"
+    echo ""
+    echo "用法: $0 [命令] [选项]"
+    echo ""
+    echo "命令:"
+    echo "  install       安装并启动服务（默认）"
+    echo "  start         启动服务"
+    echo "  stop          停止服务"
+    echo "  restart       重启服务"
+    echo "  status        查看运行状态"
+    echo "  update        更新到最新版本"
+    echo "  uninstall     卸载（保留数据，加 --yes 删除数据仍会询问）"
+    echo "  logs [N]      查看最近 N 条日志（默认 100）"
+    echo "  version       显示版本信息"
+    echo "  doctor        环境健康自检"
+    echo "  help          显示此帮助信息"
+    echo ""
+    echo "选项:"
+    echo "  --yes, -y     跳过所有确认提示（非交互模式）"
+    echo "  --version V   指定安装/更新的版本号"
+    echo "  --port P      指定监听端口（默认: ${DEFAULT_PORT}）"
+    echo ""
+    echo "示例:"
+    echo "  $0 install                          # 默认安装"
+    echo "  $0 install --port 3000              # 指定端口安装"
+    echo "  $0 update -y                        # 无交互更新"
+    echo "  $0 install --version v1.2.0         # 安装指定版本"
+    echo "  $0 logs 50                          # 查看 50 行日志"
+    echo ""
+    echo "仓库: ${REPO_URL}"
+    echo "文档: https://github.com/magiccode1412/magicmail/wiki"
+    echo ""
+    echo "安装后使用 magicmail 命令管理:"
+    echo "  magicmail status | start | stop | restart | update | logs | doctor | version"
+    echo ""
+}
+
+main() {
+    # 解析选项
+    local cmd=""
+    local cmd_args=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --yes|-y)
+                INTERACTIVE=false
+                shift
+                ;;
+            --version)
+                TARGET_VERSION="$2"
+                shift 2
+                ;;
+            --port)
+                TARGET_PORT="$2"
+                shift 2
+                ;;
+            install|start|stop|restart|status|update|uninstall|logs|log|doctor|version|help|--help|-h)
+                cmd="$1"
+                shift
+                # 收集后续作为子命令参数
+                if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^-- ]] && [[ ! "$1" =~ ^(install|start|stop|restart|status|update|uninstall|logs|log|doctor|version|help)$ ]]; then
+                    cmd_args=("$@")
+                    shift $#
+                fi
+                ;;
+            *)
+                # 未知选项，如果是第一个位置参数则当作命令
+                if [ -z "${cmd}" ]; then
+                    cmd="$1"
+                else
+                    die "未知选项: $1 (使用 '$0 help' 查看帮助)"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    cmd="${cmd:-install}"
+
+    # 路由分发
     case "${cmd}" in
         install)
             cmd_install ;;
@@ -593,25 +1568,18 @@ main() {
         uninstall|remove)
             cmd_uninstall ;;
         log|logs)
-            svc_logs ;;
+            svc_logs "${cmd_args[0]:-100}" ;;
+        version|--version|-V)
+            cmd_version ;;
+        doctor)
+            cmd_doctor ;;
         help|--help|-h)
-            echo "用法: $0 [命令]"
-            echo ""
-            echo "命令:"
-            echo "  install     安装并启动服务（默认）"
-            echo "  start       启动服务"
-            echo "  stop        停止服务"
-            echo "  restart     重启服务"
-            echo "  status      查看运行状态"
-            echo "  update      更新到最新版本"
-            echo "  uninstall   卸载（保留数据）"
-            echo "  logs         查看日志"
-            echo ""
-            echo "仓库: ${REPO_URL}"
-            ;;
+            show_help ;;
         *)
-            die "未知命令: ${cmd}。使用 '$0 help' 查看帮助" ;;
+            die "未知命令: ${cmd}。使用 '$0 help' 或 '${BIN_NAME} help' 查看帮助" ;;
     esac
+
+    exit 0
 }
 
 main "$@"

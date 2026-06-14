@@ -4,11 +4,48 @@
 
 ## 环境要求
 
-- **Go** >= 1.21
-- **Node.js** >= 18
-- **pnpm** (推荐) 或 npm
+根据你的部署方式，环境要求不同：
 
-## 方式一：构建脚本（推荐）
+| 方式 | 要求 |
+|------|------|
+| **一键部署（服务器）** | 仅需 bash + 网络，无需任何开发工具 |
+| **源码构建** | Go >= 1.21, Node.js >= 18, pnpm/npm |
+
+---
+
+## 方式一：一键部署（推荐）
+
+最适合在服务器上快速部署，自动完成一切配置：
+
+:::: code-group
+
+```bash [GitHub 原始]
+curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o deploy.sh
+```
+
+```bash [jsDelivr 镜像（国内）]
+curl -fsSL https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh -o deploy.sh
+```
+
+::::
+
+```bash
+chmod +x deploy.sh && sudo ./deploy.sh install
+```
+
+安装后使用 `magicmail` 命令管理服务：
+
+```bash
+magicmail status    # 查看状态
+magicmail doctor    # 环境自检
+magicmail logs      # 查看日志
+```
+
+详细用法见 [安装部署](/guide/installation)。
+
+---
+
+## 方式二：源码构建
 
 一键完成前端构建 + Go 编译，输出单二进制文件：
 
@@ -28,7 +65,9 @@
 
 构建产物输出到 `bin/magicmail`（或 `bin/magicmail.exe`）。
 
-## 方式二：开发环境
+---
+
+## 方式三：开发环境
 
 前后端同时启动，支持热重载：
 
@@ -52,22 +91,11 @@ cd web && pnpm install && pnpm dev
 
 Vite 开发服务器会自动代理 `/api` 请求到后端。
 
-## 方式三：手动生产构建
-
-```bash
-# 1. 构建前端
-cd web && pnpm build && cd ..
-
-# 2. 编译后端（前端产物自动嵌入二进制）
-cd server && go build -o ../bin/magicmail .
-
-# 3. 运行
-../bin/magicmail
-```
+---
 
 ## 启动服务
 
-构建完成后运行二进制文件：
+无论哪种方式，最终都是运行二进制文件：
 
 ```bash
 ./bin/magicmail
@@ -79,11 +107,14 @@ cd server && go build -o ../bin/magicmail .
 首次启动时会自动：
 - 创建 SQLite 数据库 (`data/magicmail.db`)
 - 生成 JWT 密钥和加密密钥
-- 注册管理员账号
+- 引导注册管理员账号
 :::
+
+---
 
 ## 下一步
 
-- [安装部署](/guide/installation) - 了解更多部署选项
+- [安装部署](/guide/installation) - 了解更多部署选项和 `magicmail` 命令详解
 - [功能特性](/guide/features) - 浏览完整功能列表
 - [API 文档](/api/overview) - 查看 RESTful 接口说明
+- [环境变量](/config/environment) - 配置生产环境参数

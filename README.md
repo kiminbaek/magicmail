@@ -85,6 +85,7 @@
 ├── .gitignore              # Git 忽略规则
 ├── build.sh                # 生产构建脚本（前端+后端+嵌入）
 ├── dev.sh                  # 开发环境启动脚本
+├── deploy.sh               # 一键部署脚本（安装/更新/卸载，支持 magicmail 命令）
 ├── bin/                    # 编译产物输出目录
 │   └── magicmail (.exe)      # 单文件二进制（已嵌入前端）
 │
@@ -141,7 +142,71 @@
 
 ---
 
-### 方式一：使用构建脚本（推荐）
+### 方式一：一键部署（推荐用于服务器）
+
+> 最简单的部署方式，自动完成依赖安装、二进制下载、服务注册、CLI 命令配置。支持 Linux 各发行版 / macOS / Docker。
+
+```bash
+# 方式 A：原始地址（国外 / 有代理环境）
+curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o deploy.sh
+
+# 方式 B：jsDelivr CDN 镜像（国内推荐，速度快）
+curl -fsSL https://cdn.jsdelivr.net/gh/magiccode1412/magicmail@main/deploy.sh -o deploy.sh
+
+chmod +x deploy.sh && sudo ./deploy.sh install
+
+# 安装指定版本
+sudo ./deploy.sh install --version v1.0.0
+
+# 非交互模式（跳过所有确认）
+sudo ./deploy.sh install -y
+```
+
+安装完成后，可通过全局命令 `magicmail` 管理服务：
+
+```bash
+magicmail status       # 查看运行状态
+magicmail start        # 启动服务
+magicmail stop         # 停止服务
+magicmail restart      # 重启服务
+magicmail logs         # 查看日志（默认100行）
+magicmail logs 50      # 查看最近50行日志
+magicmail update       # 更新到最新版本
+magicmail version      # 版本信息（含远程版本对比）
+magicmail doctor       # 环境健康自检
+magicmail uninstall    # 卸载程序
+
+# 查看帮助
+magicmail help
+./deploy.sh help
+```
+
+#### 支持的平台与特性
+
+| 平台 | 包管理器 | 服务管理 | 自动安装依赖 |
+|------|----------|----------|:------------:|
+| Ubuntu / Debian / Linux Mint | apt | systemd | ✅ |
+| CentOS / RHEL / Rocky / Alma | dnf / yum | systemd | ✅ |
+| Arch Linux / Manjaro | pacman | systemd | ✅ |
+| Alpine Linux | apk | systemd | ✅ |
+| OpenSUSE / SLES | zypper | systemd | ✅ |
+| macOS (Intel & Apple Silicon) | brew | LaunchDaemon | ✅ |
+| Docker 容器 | — | nohup 后台模式 | — |
+
+**部署脚本自动处理：**
+- 系统环境检测（OS / 发行版 / CPU 架构 / Docker 环境）
+- 资源预检（磁盘空间 >= 200MB / 内存 >= 256MB）
+- 端口占用检测 + 防火墙自动提示（ufw / firewalld / iptables）
+- 缺失依赖自动安装（curl / wget / tar / gzip）
+- **GitHub 镜像自动切换** — 直连失败时依次尝试 jsDelivr / ghproxy / ghfast 等 5 个国内加速镜像
+- GitHub Release 自动下载对应平台二进制
+- systemd (Linux) 或 LaunchDaemon (macOS) 服务注册 + 开机自启
+- `magicmail` 全局 CLI 命令注册到 `/usr/local/bin`
+- 安装完成汇总输出 + 自动打开浏览器
+
+---
+
+### 方式二：使用构建脚本（从源码编译）
 
 ```bash
 # 构建当前平台版本
@@ -161,7 +226,7 @@
 
 ---
 
-### 方式二：开发环境
+### 方式三：开发环境
 
 ```bash
 # 一键启动开发环境（后端 + 前端热重载）
@@ -185,7 +250,7 @@ Vite 开发服务器会自动代理 `/api` 请求到后端 `:8080`。
 
 ---
 
-### 方式三：手动生产构建
+### 方式四：手动生产构建
 
 ```bash
 # 1. 构建前端
@@ -353,6 +418,7 @@ cd server && go build -o ../bin/magicmail .
 - ⚠️ **SQLite 并发写入**：高并发场景下建议迁移到 PostgreSQL/MySQL
 - ✅ **跨平台编译**：使用纯 Go SQLite 驱动 (`modernc.org/sqlite`)，无需 CGO，可直接交叉编译 Linux/macOS/Windows
 - ✅ **混合附件缓存**：默认关闭自动缓存（`MAGICMAIL_AUTO_CACHE=false`），大附件采用懒加载模式按需从 IMAP 获取，不占用额外磁盘空间
+- 🚀 **一键部署**：使用 `deploy.sh install` 可在服务器上快速部署，安装后通过 `magicmail` 命令管理服务，支持 `doctor` 自检和 `update` 一键更新
 - 🔒 **AGPL-3.0 许可**：本程序基于 AGPLv3 开源协议发布，网络使用需提供源代码获取方式
 
 ## License
