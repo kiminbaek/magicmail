@@ -87,8 +87,8 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
             # 手动触发: 使用自定义标签或 SHA
-            type=raw,value=${{ inputs.image_tag }},enable={{{ github.event_name == 'workflow_dispatch' && inputs.image_tag != '' }}}
-            type=sha,prefix=,enable={{{ github.event_name == 'workflow_dispatch' && inputs.image_tag == '' }}}
+            type=raw,value=${{ inputs.image_tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.image_tag != '' }}
+            type=sha,prefix=,enable=${{ github.event_name == 'workflow_dispatch' && inputs.image_tag == '' }}
 
       # ─── 6. 构建并推送 (双仓库同步) ─────────────
       - name: Build and push Docker image
