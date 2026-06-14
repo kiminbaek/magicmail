@@ -45,6 +45,8 @@ jobs:
       # ─── 1. 检出代码 ──────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # 获取完整历史，包含 tags
 
       # ─── 2. 配置 QEMU (支持多架构) ────────────────
       - name: Set up QEMU

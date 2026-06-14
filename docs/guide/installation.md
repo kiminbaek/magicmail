@@ -188,9 +188,55 @@ chmod +x magicmail-linux-amd64
 
 ## 方式三：Docker 部署
 
-### Docker Compose（推荐）
+### 3.1 Docker Compose（预构建镜像）⭐ 推荐
 
-项目根目录提供了 `docker-compose.yml`，一键启动：
+使用官方预构建镜像，无需本地编译，拉取即用：
+
+```bash
+# 1. 创建数据目录（用于持久化）
+mkdir -p docker-data
+
+# 2. 使用预构建镜像启动（首次会自动拉取镜像）
+docker compose -f docker-compose.prebuilt.yml up -d
+
+# 3. 查看日志
+docker compose -f docker-compose.prebuilt.yml logs -f
+
+# 4. 停止服务
+docker compose -f docker-compose.prebuilt.yml down
+
+# 5. 停止并删除数据（⚠️ 会删除数据库）
+docker compose -f docker-compose.prebuilt.yml down -v
+```
+
+> 镜像地址: `magiccode1412/magicmail:latest`
+> 
+> Docker Hub: https://hub.docker.com/r/magiccode1412/magicmail
+
+#### 环境变量配置（可选）
+
+可通过 `.env` 文件或直接在命令中设置环境变量：
+
+```bash
+# 创建 .env 文件（可选）
+cat > .env << 'EOF'
+MAGICMAIL_PORT=8080
+TZ=Asia/Shanghai
+MAGICMAIL_MEMORY_LIMIT=512M
+MAGICMAIL_MEMORY_RESERVATION=128M
+EOF
+```
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MAGICMAIL_PORT` | `8080` | 映射到宿主机的端口 |
+| `TZ` | `Asia/Shanghai` | 容器时区 |
+| `MAGICMAIL_MEMORY_LIMIT` | `512M` | 内存上限 |
+| `MAGICMAIL_MEMORY_RESERVATION` | `128M` | 内存预留 |
+
+### 3.2 Docker Compose（源码构建）
+
+项目根目录提供了基于源码构建的 `docker-compose.yml`，适合需要自定义修改的场景：
 
 ```bash
 # 1. 复制环境变量模板（可选，按需修改端口等配置）
@@ -209,16 +255,24 @@ docker compose down
 docker compose down -v
 ```
 
-数据持久化在 `./docker-data/` 目录。可通过 `.env` 文件修改端口、时区、资源限制等配置：
+数据持久化在 `./docker-data/` 目录。可通过 `.env` 文件修改端口、时区、资源限制等配置。
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `MAGICMAIL_PORT` | `8080` | 映射到宿主机的端口 |
-| `TZ` | `Asia/Shanghai` | 容器时区 |
-| `MAGICMAIL_MEMORY_LIMIT` | `512M` | 内存上限 |
-| `MAGICMAIL_MEMORY_RESERVATION` | `128M` | 内存预留 |
+### 3.3 手动 docker run（预构建镜像）
 
-### 手动 docker run
+```bash
+# 拉取镜像
+docker pull magiccode1412/magicmail:latest
+
+# 运行
+docker run -d \
+  -p 8080:8080 \
+  -v ./docker-data:/app/data \
+  --name magicmail \
+  --restart unless-stopped \
+  magiccode1412/magicmail:latest
+```
+
+### 3.4 手动 docker run（源码构建）
 
 ```bash
 docker build -t magicmail .
@@ -280,22 +334,24 @@ nssm remove magicmail confirm # 卸载服务（confirm 确认删除）
 
 ### 方式 C：Docker Desktop
 
-如果已安装 Docker Desktop for Windows，可直接使用 Docker 部署：
+如果已安装 Docker Desktop for Windows，推荐使用预构建镜像（无需本地编译）：
 
 ```powershell
-# 拉取镜像
-docker pull magiccode1412/magicmail:latest
+# 方法一: 使用 docker-compose.prebuilt.yml（推荐）
+cp .env.example .env
+docker compose -f docker-compose.prebuilt.yml up -d
 
-# 运行
+# 方法二: 手动 docker run
+docker pull magiccode1412/magicmail:latest
 docker run -d `
   -p 8080:8080 `
-  -v ./data:/app/data `
+  -v ./docker-data:/app/data `
   --name magicmail `
   --restart unless-stopped `
   magiccode1412/magicmail:latest
 ```
 
-或使用 docker-compose（项目根目录）：
+如需从源码构建（开发/自定义场景）：
 
 ```powershell
 cp .env.example .env

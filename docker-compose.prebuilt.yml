@@ -1,0 +1,64 @@
+# ============================================================================
+# Magicmail Docker Compose (预构建镜像版)
+# 使用预构建镜像: magiccode1412/magicmail:latest
+# 无需本地构建，拉取即用
+#
+# 用法:
+#   docker compose -f docker-compose.prebuilt.yml up -d    # 启动服务
+#   docker compose -f docker-compose.prebuilt.yml down     # 停止并删除容器
+#   docker compose -f docker-compose.prebuilt.yml logs -f  # 查看日志
+#   docker compose -f docker-compose.prebuilt.yml restart  # 重启服务
+#
+# 数据持久化: ./docker-data/ 目录
+# =============================================================================
+
+services:
+  magicmail:
+    image: magiccode1412/magicmail:latest
+    container_name: magicmail
+    restart: unless-stopped
+    ports:
+      - "${MAGICMAIL_PORT:-8080}:8080"
+    volumes:
+      # SQLite 数据库 + 附件缓存持久化
+      - ./docker-data:/app/data
+    environment:
+      # ─── 运行模式 ──────────────────────
+      - MAGICMAIL_ENV=production
+      # ─── 服务监听 ──────────────────────
+      - MAGICMAIL_HOST=0.0.0.0
+      - MAGICMAIL_PORT=${MAGICMAIL_PORT:-8080}
+      - MAGICMAIL_DSN=/app/data/magicmail.db
+      # ─── CORS（按需修改域名） ──────────
+      # - MAGICMAIL_CORS_ORIGINS=https://mail.example.com
+      # ─── IMAP 同步调优 ─────────────────
+      # - MAGICMAIL_POLL_INTERVAL=300
+      # - MAGICMAIL_MAX_CONCURRENT=10
+      # ─── 附件缓存（混合模式） ──────────
+      # - MAGICMAIL_AUTO_CACHE=false
+      # - MAGICMAIL_CACHE_THRESHOLD=2
+      # - MAGICMAIL_MIN_DISK_FREE=1024
+      # ─── 时区 ──────────────────────────
+      - TZ=${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # 资源限制（按需调整）
+    deploy:
+      resources:
+        limits:
+          memory: ${MAGICMAIL_MEMORY_LIMIT:-512M}
+        reservations:
+          memory: ${MAGICMAIL_MEMORY_RESERVATION:-128M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  default:
+    name: magicmail-network

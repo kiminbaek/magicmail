@@ -240,10 +240,9 @@ is_macos() { [[ "$(uname -s)" == Darwin* ]]; }
 # 格式: "前缀" - 将 GitHub URL 前面加上此前缀即可使用镜像
 MIRROR_PREFIXES=(
     ""                                          # 原始地址（优先直连）
-    "https://mirror.ghproxy.com/"              # ghproxy 镜像（全类型通用）
+    "https://magiccode.dpdns.org/"             # magiccode（优先使用）
     "https://gh-proxy.com/"                    # gh-proxy 镜像
     "https://ghfast.top/"                      # ghfast 镜像
-    "https://github.moeyy.xyz/"               # moeyy 镜像
 )
 
 # jsDelivr CDN 专用格式: https://cdn.jsdelivr.net/gh/{user}/{repo}@{branch}/{path}
@@ -534,12 +533,12 @@ download_file() {
     info "正在下载: $(echo "${url}" | sed -E 's|https?://[^/]+/||')"
 
     # 尝试原始 URL（短超时，快速判断直连是否可用）
+    info "正在使用直连下载..."
     if _download_attempt "${url}" "${dest}" 10; then
         success "下载成功 (直连)"
         return
     fi
 
-    # 直连失败，尝试镜像
     warn "直连失败，自动切换镜像加速..."
 
     local mirror_urls
@@ -551,9 +550,19 @@ download_file() {
         [ -z "${mirror_url}" ] && continue
         [ "${mirror_url}" = "${url}" ] && continue
 
-        info "尝试镜像: ${mirror_url%%://*}..."
+        # 提取镜像名称用于日志显示
+        local mirror_name="${mirror_url%%://*}"
+        case "${mirror_name}" in
+            *magiccode.dpdns.org*)  mirror_name="magiccode" ;;
+            *gh-proxy.com*)         mirror_name="gh-proxy 镜像" ;;
+            *ghfast.top*)           mirror_name="ghfast 镜像" ;;
+            *.jsdelivr.net*)        mirror_name="jsDelivr CDN" ;;
+            *)                      mirror_name="未知源" ;;
+        esac
+
+        info "正在使用 ${mirror_name} 下载..."
         if _download_attempt "${mirror_url}" "${dest}" 30; then
-            success "下载成功 (${mirror_url%%://*})"
+            success "下载成功 (${mirror_name})"
             return
         fi
     done <<< "${mirror_urls}"
@@ -889,36 +898,74 @@ svc_logs() {
 # 第六部分：CLI Wrapper 生成模块
 # ═══════════════════════════════════════════════════════
 
-# 创建 /usr/local/bin/magicmail CLI 命令
+# 创建 /usr/local/bin/magicmail CLI 命令（自包含，不依赖 deploy.sh）
 create_cli_wrapper() {
     local wrapper="${CLI_BIN}"
 
-    cat > "${wrapper}" << WRAPPEREOF
+    cat > "${wrapper}" << 'WRAPPEREOF'
 #!/usr/bin/env bash
 # ============================================================================
-# Magicmail CLI - 由 deploy.sh install 自动生成
+# Magicmail CLI - 自包含命令行工具
 # 用法: magicmail [命令] [选项]
+# 注意: 此文件由 install 自动生成，基础操作不依赖 deploy.sh
 # ============================================================================
 set -euo pipefail
 
 # ─── 配置 ──────────────────────────────────────────
-MAGICMAIL_INSTALL_DIR="${INSTALL_DIR}"
-MAGICMAIL_DATA_DIR="${DATA_DIR}"
-MAGICMAIL_LOG_FILE="${LOG_FILE}"
-MAGICMAIL_SERVICE="${SERVICE_NAME}"
-DEPLOY_SCRIPT="\${MAGICMAIL_INSTALL_DIR}/deploy.sh"
+MAGICMAIL_INSTALL_DIR="/opt/magicmail"
+MAGICMAIL_DATA_DIR="/var/lib/magicmail"
+MAGICMAIL_LOG_FILE="/var/log/magicmail.log"
+MAGICMAIL_SERVICE="magicmail"
+DEPLOY_SCRIPT="${MAGICMAIL_INSTALL_DIR}/deploy.sh"
 
-RED='\\033[0;31m'; GREEN='\\033[0;32m'; YELLOW='\\033[1;33m'
-BLUE='\\033[0;34m'; CYAN='\\033[0;36m'; BOLD='\\033[1m'; NC='\\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
-info()  { echo -e "\${BLUE}[INFO]\${NC}  \$*"; }
-ok()    { echo -e "\${GREEN}[OK]\${NC}    \$*"; }
-warn()  { echo -e "\${YELLOW}[WARN]\${NC}  \$*"; }
-error() { echo -e "\${RED}[ERROR]\${NC} \$*" >&2; }
+info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
+ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+
+# ─── 工具函数 ──────────────────────────────────────
+_detect_os() {
+    case "$(uname -s)" in
+        Linux)  echo "linux" ;;
+        Darwin) echo "macos" ;;
+        *)      echo "other" ;;
+    esac
+}
+
+_is_docker() {
+    [ -f /.dockerenv ] 2>/dev/null || grep -qi 'docker\|lxc' /proc/1/cgroup 2>/dev/null
+}
+
+_is_linux()  { [ "$(_detect_os)" = "linux" ]; }
+_is_macos()  { [ "$(_detect_os)" = "macos" ]; }
+
+_ensure_root() {
+    if [ $EUID -ne 0 ]; then
+        exec sudo "$0" "$@"
+    fi
+}
+
+# 检查 deploy.sh 是否可用，不可用时给出友好提示
+_check_deploy_script() {
+    if [ ! -x "${DEPLOY_SCRIPT}" ] && [ ! -f "${DEPLOY_SCRIPT}" ]; then
+        error "部署脚本不存在: ${DEPLOY_SCRIPT}"
+        echo ""
+        warn "此功能需要部署脚本支持，请重新下载:"
+        echo "  curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh -o ${DEPLOY_SCRIPT}"
+        echo "  chmod +x ${DEPLOY_SCRIPT}"
+        echo ""
+        echo "或者直接执行:"
+        echo "  curl -fsSL https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh | sudo bash -s -- $*"
+        exit 1
+    fi
+}
 
 show_help() {
     echo ""
-    echo -e "\${CYAN}\${BOLD}Magicmail 魔法邮箱 - 命令行工具\${NC}"
+    echo -e "${CYAN}${BOLD}Magicmail 魔法邮箱 - 命令行工具${NC}"
     echo ""
     echo "用法: magicmail <命令> [选项]"
     echo ""
@@ -927,11 +974,12 @@ show_help() {
     echo "  start        启动服务"
     echo "  stop         停止服务"
     echo "  restart      重启服务"
-    echo "  update       更新到最新版本"
+    echo "  update       更新到最新版本 (需要部署脚本)"
     echo "  logs [N]     查看最近 N 行日志 (默认100)"
     echo "  version      显示版本信息"
-    echo "  doctor       环境健康自检"
-    echo "  uninstall    卸载程序"
+    echo "  doctor       环境健康自检 (需要部署脚本)"
+    echo "  uninstall    卸载程序 (需要部署脚本)"
+    echo "  update-script 更新部署脚本到最新版"
     echo "  help, -h     显示此帮助"
     echo ""
     echo "选项:"
@@ -942,64 +990,207 @@ show_help() {
     echo "  magicmail logs 50         # 查看50行日志"
     echo "  magicmail update -y       # 无交互更新"
     echo ""
-    echo "更多信息: \${MAGICMAIL_INSTALL_DIR}/deploy.sh help"
 }
 
-# 需要 root 的命令列表
-needs_root() { [[ " start stop restart update uninstall " == *" $1 "* ]]; }
+# ─── 状态查询（自包含）──────────────────────────────
+_cmd_status() {
+    local bin="${MAGICMAIL_INSTALL_DIR}/magicmail"
+    local running="否"
 
+    if _is_docker; then
+        pgrep -f "${bin}" &>/dev/null && running="是 (Docker)"
+    elif _is_linux; then
+        if systemctl is-active --quiet "${MAGICMAIL_SERVICE}" 2>/dev/null; then
+            running="是 (systemd active)"
+        else
+            pgrep -f "${bin}" &>/dev/null && running="是 (进程运行中)"
+        fi
+    elif _is_macos; then
+        launchctl print "com.magicmail.service" &>/dev/null 2>&1 && running="是 (launchd)"
+    fi
+
+    echo ""
+    echo -e "${CYAN}${BOLD}Magicmail 服务状态${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  运行状态:   ${running}"
+    echo "  二进制:     ${bin}$([ -x "${bin}" ] || echo ' (缺失)')"
+    echo "  数据目录:   ${MAGICMAIL_DATA_DIR}"
+
+    if [ -f "${MAGICMAIL_INSTALL_DIR}/.version" ]; then
+        echo "  已装版本:   $(cat "${MAGICMAIL_INSTALL_DIR}/.version")"
+    fi
+
+    local port="${MAGICMAIL_PORT:-8080}"
+    echo "  监听端口:   ${port}"
+
+    if _is_linux; then
+        echo ""
+        systemctl status "${MAGICMAIL_SERVICE}" 2>/dev/null | head -15 || true
+    fi
+}
+
+# ─── 日志查看（自包含）──────────────────────────────
+_cmd_logs() {
+    local lines="${1:-100}"
+
+    if [ ! -f "${MAGICMAIL_LOG_FILE}" ]; then
+        error "日志文件不存在: ${MAGICMAIL_LOG_FILE}"
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${CYAN}${BOLD}最近 ${lines} 行日志${NC} (${MAGICMAIL_LOG_FILE})"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    tail -n "${lines}" "${MAGICMAIL_LOG_FILE}" 2>/dev/null || error "无法读取日志"
+}
+
+# ─── 版本信息（自包含）──────────────────────────────
+_cmd_version() {
+    local bin="${MAGICMAIL_INSTALL_DIR}/magicmail"
+
+    if [ ! -x "${bin}" ]; then
+        error "Magicmail 未安装或二进制文件缺失"
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${CYAN}${BOLD}Magicmail${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  安装路径:  ${bin}"
+    echo "  数据目录:  ${MAGICMAIL_DATA_DIR}"
+    echo "  日志文件:  ${MAGICMAIL_LOG_FILE}"
+
+    if [ -f "${MAGICMAIL_INSTALL_DIR}/.version" ]; then
+        echo "  版本信息:  $(cat "${MAGICMAIL_INSTALL_DIR}/.version")"
+    fi
+
+    echo "  服务名称:  ${MAGICMAIL_SERVICE}"
+
+    local fsize fmod
+    fsize=$(stat -c%s "${bin}" 2>/dev/null || stat -f%z "${bin}" 2>/dev/null || echo "?")
+    fmod=$(stat -c%y "${bin}" 2>/dev/null | cut -d'.' -f1 || stat -f "%Sm" "${bin}" 2>/dev/null || echo "?")
+    echo "  文件大小:  $(( fsize / 1024 )) KB"
+    echo "  修改时间:  ${fmod}"
+}
+
+# ─── 更新部署脚本（自包含）───────────────────────────
+_cmd_update_script() {
+    local script_url="https://raw.githubusercontent.com/magiccode1412/magicmail/main/deploy.sh"
+    local backup="${DEPLOY_SCRIPT}.bak.$(date +%Y%m%d%H%M%S)"
+    local tmpfile="${MAGICMAIL_INSTALL_DIR}/.deploy.sh.tmp"
+
+    info "正在从 GitHub 获取最新部署脚本..."
+    echo "  来源: ${script_url}"
+
+    # 检查下载工具
+    if command -v curl &>/dev/null; then
+        curl -fsSL --connect-timeout 10 --max-time 60 -o "${tmpfile}" "${script_url}" 2>/dev/null
+    elif command -v wget &>/dev/null; then
+        wget -q --timeout=60 -O "${tmpfile}" "${script_url}" 2>/dev/null
+    else
+        error "找不到 curl 或 wget，无法下载"
+        exit 1
+    fi
+
+    if [ ! -s "${tmpfile}" ]; then
+        error "下载失败或文件为空，请检查网络连接"
+        rm -f "${tmpfile}"
+        exit 1
+    fi
+
+    # 验证是合法的 bash 脚本（简单检查）
+    if ! head -1 "${tmpfile}" | grep -qE '^#!/usr/bin/env bash|^#!/bin/bash'; then
+        error "下载的文件不是有效的 Bash 脚本"
+        rm -f "${tmpfile}"
+        exit 1
+    fi
+
+    # 备份旧版本
+    if [ -f "${DEPLOY_SCRIPT}" ]; then
+        cp -f "${DEPLOY_SCRIPT}" "${backup}" 2>/dev/null || true
+        info "旧版本已备份: ${backup}"
+    fi
+
+    # 替换为新版
+    mv -f "${tmpfile}" "${DEPLOY_SCRIPT}"
+    chmod +x "${DEPLOY_SCRIPT}"
+
+    ok "部署脚本已更新: ${DEPLOY_SCRIPT}"
+}
+
+# ════════════════════════════════════════════════════
 # 主路由
-cmd="\${1:-help}"
+# ════════════════════════════════════════════════════
+cmd="${1:-help}"
 shift 2>/dev/null || true
 
-case "\${cmd}" in
+case "${cmd}" in
     status)
-        if [[ \$EUID -ne 0 ]] && needs_root "start"; then
-            sudo "\$0" status "\$@"
-        else
-            exec "\${DEPLOY_SCRIPT}" status "\$@"
-        fi
+        _cmd_status
         ;;
-    start|stop|restart|update|uninstall)
-        if [[ \$EUID -ne 0 ]]; then
-            echo -e "\${YELLOW}需要 root 权限，正在使用 sudo...\${NC}"
-            exec sudo "\$0" "\${cmd}" "\$@"
-        else
-            exec "\${DEPLOY_SCRIPT}" "\${cmd}" "\$@"
+    start)
+        _ensure_root start "$@" || true
+        info "正在启动 Magicmail 服务..."
+        if _is_docker; then
+            cd "${MAGICMAIL_DATA_DIR}" && nohup "${MAGICMAIL_INSTALL_DIR}/magicmail" >> "${MAGICMAIL_LOG_FILE}" 2>&1 &
+            sleep 2
+        elif _is_linux; then
+            systemctl start "${MAGICMAIL_SERVICE}"
+        elif _is_macos; then
+            launchctl start "com.magicmail.service" 2>/dev/null || true
         fi
+        ok "服务启动完成"
+        ;;
+    stop)
+        _ensure_root stop "$@" || true
+        info "正在停止 Magicmail 服务..."
+        if _is_docker; then
+            pkill -f "${MAGICMAIL_INSTALL_DIR}/magicmail" 2>/dev/null || true
+        elif _is_linux; then
+            systemctl stop "${MAGICMAIL_SERVICE}"
+        elif _is_macos; then
+            launchctl stop "com.magicmail.service" 2>/dev/null || true
+        fi
+        ok "服务已停止"
+        ;;
+    restart)
+        _ensure_root restart "$@" || true
+        info "正在重启 Magicmail 服务..."
+        if _is_docker; then
+            pkill -f "${MAGICMAIL_INSTALL_DIR}/magicmail" 2>/dev/null || true
+            sleep 1
+            cd "${MAGICMAIL_DATA_DIR}" && nohup "${MAGICMAIL_INSTALL_DIR}/magicmail" >> "${MAGICMAIL_LOG_FILE}" 2>&1 &
+            sleep 2
+        elif _is_linux; then
+            systemctl restart "${MAGICMAIL_SERVICE}"
+        elif _is_macos; then
+            launchctl stop "com.magicmail.service" 2>/dev/null || true
+            sleep 1
+            launchctl start "com.magicmail.service" 2>/dev/null || true
+        fi
+        ok "服务重启完成"
         ;;
     logs)
-        lines="\${1:-100}"
-        if [[ \$EUID -ne 0 ]]; then
-            sudo "\$0" logs "\${lines}"
-        else
-            exec "\${DEPLOY_SCRIPT}" logs "\${lines}"
-        fi
+        _cmd_logs "${1:-100}"
         ;;
-    version)
-        local bin="\${MAGICMAIL_INSTALL_DIR}/magicmail"
-        if [ -x "\${bin}" ]; then
-            echo -e "\${CYAN}\${BOLD}Magicmail\${NC}"
-            echo "  安装路径: \${bin}"
-            echo "  数据目录: \${MAGICMAIL_DATA_DIR}"
-            echo "  日志文件: \${MAGICMAIL_LOG_FILE}"
-            if [ -f "\${MAGICMAIL_INSTALL_DIR}/.version" ]; then
-                echo "  版本信息: \$(cat \${MAGICMAIL_INSTALL_DIR}/.version)"
-            fi
-            echo "  服务名称: \${MAGICMAIL_SERVICE}"
-        else
-            error "Magicmail 未安装。请先执行: sudo ./deploy.sh install"
-            exit 1
-        fi
+    version|--version|-V)
+        _cmd_version
         ;;
-    doctor)
-        exec "\${DEPLOY_SCRIPT}" doctor "\$@"
+    update|uninstall|doctor)
+        # 这些命令依赖部署脚本，检测其是否存在
+        _check_deploy_script
+        exec "${DEPLOY_SCRIPT}" "${cmd}" "$@"
+        ;;
+    update-script)
+        # 自包含：直接从 GitHub 下载最新部署脚本替换本地副本
+        _ensure_root update-script "$@" || true
+        _cmd_update_script
         ;;
     help|--help|-h|"")
         show_help
         ;;
     *)
-        error "未知命令: \${cmd}"
+        error "未知命令: ${cmd}"
         echo "使用 'magicmail help' 查看帮助"
         exit 1
         ;;
@@ -1014,7 +1205,7 @@ WRAPPEREOF
 remove_cli_wrapper() {
     if [ -L "${CLI_BIN}" ] || [ -f "${CLI_BIN}" ]; then
         # 如果是本脚本生成的 wrapper 则移除
-        if head -5 "${CLI_BIN}" 2>/dev/null | grep -q "由 deploy.sh install 自动生成"; then
+        if head -5 "${CLI_BIN}" 2>/dev/null | grep -qE "(由 deploy.sh install 自动生成|自包含命令行工具)"; then
             rm -f "${CLI_BIN}"
             info "CLI 命令已移除: ${CLI_BIN}"
         else
@@ -1031,6 +1222,56 @@ remove_cli_wrapper() {
 cmd_install() {
     check_root install
     print_banner
+
+    # 0. 检测是否已安装
+    local installed_ver=""
+    installed_ver="$(get_installed_version 2>/dev/null || echo '')"
+    if [ -n "${installed_ver}" ]; then
+        info "检测到已安装版本: ${installed_ver}"
+
+        # 获取最新版本
+        local latest_ver="${TARGET_VERSION}"
+        if [ -z "${latest_ver}" ]; then
+            latest_ver="$(get_latest_version 2>/dev/null || echo '')"
+        fi
+
+        # 无法获取远程版本时，直接提示已安装并退出
+        if [ -z "${latest_ver}" ]; then
+            warn "无法获取远程版本信息，跳过重复安装"
+            echo ""
+            echo -e "  ${YELLOW}Magicmail 已安装 (v${installed_ver})${NC}"
+            echo "  如需重新安装，请先执行: $0 uninstall"
+            echo "  或执行更新:           $0 update"
+            exit 0
+        fi
+
+        info "最新可用版本: ${latest_ver}"
+
+        # 比较版本，无更新则退出
+        if [ "${installed_ver}" = "${latest_ver}" ]; then
+            success "当前已是最新版本 (${installed_ver})"
+            echo ""
+            echo -e "  ${GREEN}无需更新${NC}，如需重装请先: $0 uninstall"
+            exit 0
+        fi
+
+        # 有新版本，询问用户
+        echo ""
+        echo -e "  ${YELLOW}发现新版本: ${CYAN}${installed_ver}${YELLOW} → ${BOLD}${latest_ver}${NC}"
+        if ${INTERACTIVE}; then
+            read -rp "  是否立即更新? [Y/n] " confirm
+            if [[ "${confirm:-Y}" =~ ^[Nn]$ ]]; then
+                info "已取消，保持当前版本 v${installed_ver}"
+                exit 0
+            fi
+        else
+            info "非交互模式，自动执行更新..."
+        fi
+
+        # 用户确认后走更新流程（停止服务→下载新版→重启）
+        cmd_update
+        return
+    fi
 
     # 1. 环境检测
     TARGET_OS="$(detect_os)"

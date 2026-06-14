@@ -90,7 +90,8 @@
 ├── build.sh                # 生产构建脚本（前端+后端+嵌入）
 ├── dev.sh                  # 开发环境启动脚本
 ├── deploy.sh               # 一键部署脚本（安装/更新/卸载，支持 magicmail 命令）
-├── docker-compose.yml      # Docker Compose 编排（含健康检查、资源限制、日志轮转）
+├── docker-compose.yml      # Docker Compose 编排（源码构建版，含健康检查、资源限制、日志轮转）
+├── docker-compose.prebuilt.yml  # Docker Compose 编排（预构建镜像版，拉取即用）⭐ 推荐
 ├── bin/                    # 编译产物输出目录
 │   └── magicmail (.exe)      # 单文件二进制（已嵌入前端）
 │
@@ -211,7 +212,32 @@ magicmail help
 
 ---
 
-### 方式二：Docker Compose（容器环境）
+### 方式二：Docker Compose（容器环境）⭐ 推荐
+
+#### 2.1 使用预构建镜像（无需本地编译）
+
+```bash
+# 1. 创建数据目录
+mkdir -p docker-data
+
+# 2. 复制配置模板（可选，修改端口/时区/资源限制）
+cp .env.example .env
+
+# 3. 使用预构建镜像一键启动（首次会自动拉取镜像）
+docker compose -f docker-compose.prebuilt.yml up -d
+
+# 4. 查看日志
+docker compose -f docker-compose.prebuilt.yml logs -f
+
+# 停止: docker compose -f docker-compose.prebuilt.yml down    # 重启: docker compose -f docker-compose.prebuilt.yml restart
+```
+
+**镜像地址**: `magiccode1412/magicmail:latest`
+- Docker Hub: https://hub.docker.com/r/magiccode1412/magicmail
+- GitHub Container Registry: `ghcr.io/magiccode1412/magicmail:latest`
+- 支持架构: `linux/amd64` + `linux/arm64`
+
+#### 2.2 从源码构建（开发/自定义场景）
 
 ```bash
 # 1. 复制配置模板（可选，修改端口/时区/资源限制）
@@ -227,17 +253,6 @@ docker compose logs -f
 ```
 
 数据自动持久化到 `./docker-data/` 目录。详见 [安装部署 > Docker](https://160621.xyz/magicmail/guide/installation)。
-
-> **预构建镜像**：也可直接拉取多架构预构建镜像（amd64 + arm64）：
-> ```bash
-> # Docker Hub
-> docker pull magiccode1412/magicmail:latest
-> docker pull magiccode1412/magicmail:v1.2.3   # 指定版本
->
-> # GitHub Container Registry (ghcr.io)
-> docker pull ghcr.io/magiccode1412/magicmail:latest
-> docker pull ghcr.io/magiccode1412/magicmail:v1.2.3
-> ```
 
 ---
 
@@ -307,8 +322,13 @@ nssm start magicmail
 
 **方式 C — Docker Desktop：**
 ```powershell
+# 方法一: 使用 docker-compose.prebuilt.yml（推荐）
+cp .env.example .env
+docker compose -f docker-compose.prebuilt.yml up -d
+
+# 方法二: 手动 docker run
 docker pull magiccode1412/magicmail:latest
-docker run -d -p 8080:8080 -v ./data:/app/data --name magicmail --restart unless-stopped magiccode1412/magicmail:latest
+docker run -d -p 8080:8080 -v ./docker-data:/app/data --name magicmail --restart unless-stopped magiccode1412/magicmail:latest
 ```
 
 详见 [安装部署 > Windows](https://160621.xyz/magicmail/guide/installation#方式四windows-部署)
