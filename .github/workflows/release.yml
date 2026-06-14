@@ -115,7 +115,7 @@ jobs:
         run: |
           OUTPUT="../dist/magicmail${{ matrix.suffix }}"
           go build \
-            -ldflags="-s -w -X main.version=${VERSION}" \
+            -ldflags="-s -w -X main.version=${VERSION} -X main.isProduction=true" \
             -o "${OUTPUT}" \
             .
           echo "Built: $(du -h ${OUTPUT} | cut -f1)"

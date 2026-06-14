@@ -33,7 +33,7 @@ COPY server/ .
 COPY --from=frontend-builder /app/server/dist ./embedfs/dist
 
 # 编译（CGO_ENABLED=0 纯静态链接，支持 SQLite 需要 CGO）
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /magicmail .
+RUN CGO_ENABLED=1 go build -ldflags="-s -w -X main.isProduction=true" -o /magicmail .
 
 # ---- Stage 3: 最终运行镜像 ----
 FROM alpine:3.20
