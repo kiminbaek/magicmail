@@ -1,6 +1,19 @@
 # Changelog
 
 所有重要变更都会记录在此文件中。
+## [v1.0.1] - 2026-06-14
+
+- ### 安全
+- 修复 Docker 构建与 GitHub Release 构建产物未注入生产标记的问题，防止运行时打印 SQL 查询日志导致数据泄露
+
+### 部署 & CI/CD
+- Docker 数据目录迁移至 /app/data，更新容器内路径配置
+- 新增 Docker Compose 编排文件，支持一键编排部署
+- GitHub Actions 新增 Docker 多架构镜像自动构建推送 (linux/amd64 + linux/arm64)
+- GitHub Actions 新增多架构交叉编译 Release 自动发布 (Linux/Windows/macOS x86_64/ARM64)
+- 部署脚本重构：支持交互菜单、系统自检、镜像加速、macOS LaunchDaemon
+- 新增 Windows 平台部署支持
+
 
 ## [v1.0.0] - 2026-06-13
 
