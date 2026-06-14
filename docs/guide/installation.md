@@ -118,6 +118,7 @@ magicmail help         # 查看 CLI 命令帮助
 | Alpine Linux | apk | systemd |
 | OpenSUSE / SLES | zypper | systemd |
 | macOS (Intel & Apple Silicon) | brew | LaunchDaemon |
+| **Windows** | — | NSSM / WinSW / Docker Desktop |
 | Docker 容器 | — | nohup 后台模式 |
 
 ::: tip Docker 环境说明
@@ -187,6 +188,38 @@ chmod +x magicmail-linux-amd64
 
 ## 方式三：Docker 部署
 
+### Docker Compose（推荐）
+
+项目根目录提供了 `docker-compose.yml`，一键启动：
+
+```bash
+# 1. 复制环境变量模板（可选，按需修改端口等配置）
+cp .env.example .env
+
+# 2. 构建并启动
+docker compose up -d --build
+
+# 3. 查看日志
+docker compose logs -f
+
+# 4. 停止服务
+docker compose down
+
+# 5. 停止并删除数据（⚠️ 会删除数据库）
+docker compose down -v
+```
+
+数据持久化在 `./docker-data/` 目录。可通过 `.env` 文件修改端口、时区、资源限制等配置：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MAGICMAIL_PORT` | `8080` | 映射到宿主机的端口 |
+| `TZ` | `Asia/Shanghai` | 容器时区 |
+| `MAGICMAIL_MEMORY_LIMIT` | `512M` | 内存上限 |
+| `MAGICMAIL_MEMORY_RESERVATION` | `128M` | 内存预留 |
+
+### 手动 docker run
+
 ```bash
 docker build -t magicmail .
 docker run -d \
@@ -201,7 +234,100 @@ docker run -d \
 
 ---
 
-## 方式四：systemd 手动配置（Linux）
+## 方式四：Windows 部署
+
+> Windows 不支持一键部署脚本，推荐直接下载预编译二进制或使用 Docker Desktop。
+
+### 方式 A：直接运行二进制（最简）
+
+1. 前往 [GitHub Releases](https://github.com/magiccode1412/magicmail/releases) 下载 `magicmail-windows-amd64.exe`
+2. 将 `.exe` 放入目标目录（如 `C:\magicmail\`）
+3. 双击或在 PowerShell / CMD 中运行：
+
+```powershell
+# PowerShell / CMD
+.\magicmail-windows-amd64.exe
+```
+
+程序启动后访问 `http://localhost:8080` 即可。默认情况下数据库和附件保存在程序同目录下。
+
+### 方式 B：注册为 Windows 服务（开机自启）
+
+使用 **NSSM (Non-Sucking Service Manager)** 将 Magicmail 注册为系统后台服务：
+
+```powershell
+# 1. 下载 NSSM: https://nssm.cc/download
+#    解压后得到 nssm.exe（win64 目录）
+
+# 2. 注册服务
+nssm install magicmail "C:\magicmail\magicmail-windows-amd64.exe"
+
+# 3. （可选）配置工作目录和数据目录 — 在 NSSM GUI 中设置：
+#    IIS > Application → Working directory = C:\magicmail
+#    IIS > AppExit = Restart（崩溃自动重启）
+
+# 4. 启动服务
+nssm start magicmail
+
+# --- 常用管理命令 ---
+nssm stop magicmail          # 停止
+nssm restart magicmail       # 重启
+nssm status magicmail        # 查看状态
+nssm remove magicmail confirm # 卸载服务（confirm 确认删除）
+```
+
+> 💡 **替代方案**：也可使用 [WinSW](https://github.com/winsw/winsw)（XML 配置式）注册服务，适合需要更复杂配置的场景。
+
+### 方式 C：Docker Desktop
+
+如果已安装 Docker Desktop for Windows，可直接使用 Docker 部署：
+
+```powershell
+# 拉取镜像
+docker pull magiccode1412/magicmail:latest
+
+# 运行
+docker run -d `
+  -p 8080:8080 `
+  -v C:\magicmail\data:C:\data `
+  --name magicmail `
+  --restart unless-stopped `
+  magiccode1412/magicmail:latest
+```
+
+或使用 docker-compose（项目根目录）：
+
+```powershell
+cp .env.example .env
+docker compose up -d --build
+```
+
+### Windows 路径说明
+
+| 项目 | 默认路径 |
+|------|----------|
+| 工作目录 | 可执行文件所在目录 |
+| 数据库 | `%CD%\magicmail.db` |
+| 日志 | 控制台输出（服务模式写入 Windows 事件日志） |
+| 监听端口 | `8080` |
+
+可通过环境变量修改默认值：
+
+```powershell
+# CMD
+set MAGICMAIL_PORT=3000
+set MAGICMAIL_DSN=C:\data\magicmail.db
+.\magicmail-windows-amd64.exe
+
+# PowerShell
+$env:MAGICMAIL_PORT=3000
+$env:MAGICMAIL_DSN="C:\data\magicmail.db"
+.\magicmail-windows-amd64.exe
+```
+
+---
+
+## 方式五：systemd 手动配置（Linux）
 
 如果需要手动配置 systemd 服务，可参考以下步骤：
 

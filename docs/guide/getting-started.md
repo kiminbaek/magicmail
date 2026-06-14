@@ -8,7 +8,8 @@
 
 | 方式 | 要求 |
 |------|------|
-| **一键部署（服务器）** | 仅需 bash + 网络，无需任何开发工具 |
+| **一键部署（服务器）** | 仅需 bash + 网络，无需任何开发工具（Linux / macOS） |
+| **Windows** | 直接下载 `.exe` 运行，或使用 Docker Desktop |
 | **源码构建** | Go >= 1.21, Node.js >= 18, pnpm/npm |
 
 ---
@@ -42,6 +43,30 @@ magicmail logs      # 查看日志
 ```
 
 详细用法见 [安装部署](/guide/installation)。
+
+---
+
+## Windows 用户
+
+Windows 不支持一键部署脚本，推荐以下方式：
+
+**直接运行：**
+1. 从 [GitHub Releases](https://github.com/magiccode1412/magicmail/releases) 下载 `magicmail-windows-amd64.exe`
+2. 放入目标目录，双击运行即可
+
+**注册为系统服务（开机自启）：**
+使用 [NSSM](https://nssm.cc/download) 注册 Windows 服务：
+```powershell
+nssm install magicmail "C:\magicmail\magicmail-windows-amd64.exe"
+nssm start magicmail
+```
+
+**Docker Desktop：**
+```powershell
+docker run -d -p 8080:8080 -v C:\data:C:\data --name magicmail --restart unless-stopped magiccode1412/magicmail:latest
+```
+
+完整 Windows 教程见 [安装部署 > Windows](/guide/installation#方式四windows-部署)。
 
 ---
 

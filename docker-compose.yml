@@ -1,0 +1,80 @@
+# ============================================================================
+# Magicmail Docker Compose 编排
+# 用法:
+#   docker compose up -d              # 启动服务
+#   docker compose down               # 停止并删除容器
+#   docker compose logs -f            # 查看日志
+#   docker compose restart            # 重启服务
+#   docker compose up -d --build      # 重新构建并启动
+#
+# 数据持久化: ./docker-data/ 目录
+# =============================================================================
+
+services:
+  magicmail:
+    build: .
+    container_name: magicmail
+    restart: unless-stopped
+    ports:
+      - "${MAGICMAIL_PORT:-8080}:8080"
+    volumes:
+      # SQLite 数据库 + 附件缓存持久化
+      - ./docker-data:/data
+    environment:
+      # ─── 运行模式 ──────────────────────
+      - MAGICMAIL_ENV=production
+      # ─── 服务监听 ──────────────────────
+      - MAGICMAIL_HOST=0.0.0.0
+      - MAGICMAIL_PORT=${MAGICMAIL_PORT:-8080}
+      - MAGICMAIL_DSN=/data/magicmail.db
+      # ─── CORS（按需修改域名） ──────────
+      # - MAGICMAIL_CORS_ORIGINS=https://mail.example.com
+      # ─── IMAP 同步调优 ─────────────────
+      # - MAGICMAIL_POLL_INTERVAL=300
+      # - MAGICMAIL_MAX_CONCURRENT=10
+      # ─── 附件缓存（混合模式） ──────────
+      # - MAGICMAIL_AUTO_CACHE=false
+      # - MAGICMAIL_CACHE_THRESHOLD=2
+      # - MAGICMAIL_MIN_DISK_FREE=1024
+      # ─── 时区 ──────────────────────────
+      - TZ=${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries:3
+    # 资源限制（按需调整）
+    deploy:
+      resources:
+        limits:
+          memory: ${MAGICMAIL_MEMORY_LIMIT:-512M}
+        reservations:
+          memory: ${MAGICMAIL_MEMORY_RESERVATION:-128M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 可选：配合 Nginx 反向代理使用
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: magicmail-nginx
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+  #     - nginx-certs:/etc/nginx/certs:ro
+  #   depends_on:
+  #     - magicmail
+
+volumes:
+  # Nginx SSL 证书卷（取消 nginx 服务注释后启用）
+  # nginx-certs:
+
+networks:
+  default:
+    name: magicmail-network

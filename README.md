@@ -82,10 +82,15 @@
 
 ```
 /workspace/
+├── .github/                # GitHub Actions CI/CD
+│   └── workflows/
+│       └── docker-publish.yml   # 多架构 Docker 镜像构建 + 推送至 Docker Hub
 ├── .gitignore              # Git 忽略规则
+├── .env.example            # Docker 环境变量模板
 ├── build.sh                # 生产构建脚本（前端+后端+嵌入）
 ├── dev.sh                  # 开发环境启动脚本
 ├── deploy.sh               # 一键部署脚本（安装/更新/卸载，支持 magicmail 命令）
+├── docker-compose.yml      # Docker Compose 编排（含健康检查、资源限制、日志轮转）
 ├── bin/                    # 编译产物输出目录
 │   └── magicmail (.exe)      # 单文件二进制（已嵌入前端）
 │
@@ -206,7 +211,60 @@ magicmail help
 
 ---
 
-### 方式二：使用构建脚本（从源码编译）
+### 方式二：Docker Compose（容器环境）
+
+```bash
+# 1. 复制配置模板（可选，修改端口/时区/资源限制）
+cp .env.example .env
+
+# 2. 构建并启动
+docker compose up -d --build
+
+# 3. 查看日志
+docker compose logs -f
+
+# 停止: docker compose down    # 重启: docker compose restart
+```
+
+数据自动持久化到 `./docker-data/` 目录。详见 [安装部署 > Docker](https://160621.xyz/magicmail/guide/installation)。
+
+> **预构建镜像**：也可直接拉取多架构预构建镜像（amd64 + arm64）：
+> ```bash
+> # Docker Hub
+> docker pull magiccode1412/magicmail:latest
+> docker pull magiccode1412/magicmail:v1.2.3   # 指定版本
+>
+> # GitHub Container Registry (ghcr.io)
+> docker pull ghcr.io/magiccode1412/magicmail:latest
+> docker pull ghcr.io/magiccode1412/magicmail:v1.2.3
+> ```
+
+---
+
+### 方式三：CI/CD 自动构建（Docker Hub）
+
+项目配置了 GitHub Actions 工作流 (`.github/workflows/docker-publish.yml`)，推送 `v*` 标签时自动触发多架构镜像构建并推送至 Docker Hub：
+
+| 项目 | 说明 |
+|------|------|
+| **触发条件** | 推送 `v*` 格式的 tag（如 `v1.2.3`），或手动触发 |
+| **目标架构** | `linux/amd64` + `linux/arm64` |
+| **镜像仓库 1** | `docker.io/magiccode1412/magicmail` (Docker Hub) |
+| **镜像仓库 2** | `ghcr.io/magiccode1412/magicmail` (GitHub Container Registry) |
+| **自动标签** | `v1.2.3` / `1.2.3` / `1.2` / `1` / `latest` |
+
+**使用前需配置 Secrets（Docker Hub）：**
+
+| Secret | 说明 | 必要性 |
+|--------|------|--------|
+| `DOCKERHUB_USERNAME` | Docker Hub 用户名 | 仅 Docker Hub |
+| `DOCKERHUB_TOKEN` | Docker Hub Access Token（[生成地址](https://hub.docker.com/settings/security)）| 仅 Docker Hub |
+
+> **GitHub Container Registry (ghcr.io)** 使用 `GITHUB_TOKEN` 自动认证，无需额外配置 Secret。
+
+---
+
+### 方式四：使用构建脚本（从源码编译）
 
 ```bash
 # 构建当前平台版本
@@ -226,7 +284,38 @@ magicmail help
 
 ---
 
-### 方式三：开发环境
+### 方式四：Windows 部署
+
+Windows 不支持一键部署脚本，推荐以下方式：
+
+**方式 A — 直接运行二进制（最简）：**
+
+1. 从 [GitHub Releases](https://github.com/magiccode1412/magicmail/releases) 下载 `magicmail-windows-amd64.exe`
+2. 放入目标目录（如 `C:\magicmail\`），双击或 PowerShell 运行：
+```powershell
+.\magicmail-windows-amd64.exe
+```
+
+**方式 B — 注册为 Windows 服务（开机自启）：**
+
+使用 [NSSM](https://nssm.cc/download) 注册系统服务：
+```powershell
+nssm install magicmail "C:\magicmail\magicmail-windows-amd64.exe"
+nssm start magicmail
+# 停止: nssm stop magicmail    卸载: nssm remove magicmail confirm
+```
+
+**方式 C — Docker Desktop：**
+```powershell
+docker pull magiccode1412/magicmail:latest
+docker run -d -p 8080:8080 -v C:\magicmail\data:C:\data --name magicmail --restart unless-stopped magiccode1412/magicmail:latest
+```
+
+详见 [安装部署 > Windows](https://160621.xyz/magicmail/guide/installation#方式四windows-部署)
+
+---
+
+### 方式五：开发环境
 
 ```bash
 # 一键启动开发环境（后端 + 前端热重载）
@@ -250,7 +339,7 @@ Vite 开发服务器会自动代理 `/api` 请求到后端 `:8080`。
 
 ---
 
-### 方式四：手动生产构建
+### 方式六：手动生产构建
 
 ```bash
 # 1. 构建前端
