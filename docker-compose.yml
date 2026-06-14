@@ -19,14 +19,14 @@ services:
       - "${MAGICMAIL_PORT:-8080}:8080"
     volumes:
       # SQLite 数据库 + 附件缓存持久化
-      - ./docker-data:/data
+      - ./docker-data:/app/data
     environment:
       # ─── 运行模式 ──────────────────────
       - MAGICMAIL_ENV=production
       # ─── 服务监听 ──────────────────────
       - MAGICMAIL_HOST=0.0.0.0
       - MAGICMAIL_PORT=${MAGICMAIL_PORT:-8080}
-      - MAGICMAIL_DSN=/data/magicmail.db
+      - MAGICMAIL_DSN=/app/data/magicmail.db
       # ─── CORS（按需修改域名） ──────────
       # - MAGICMAIL_CORS_ORIGINS=https://mail.example.com
       # ─── IMAP 同步调优 ─────────────────

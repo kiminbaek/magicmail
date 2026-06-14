@@ -86,13 +86,28 @@ error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 die()     { error "$*"; exit 1; }
 
 print_banner() {
+    local ver="$(get_installed_version 2>/dev/null || echo '?.?.?')"
     echo ""
-    echo -e "${CYAN}${BOLD}"
-    echo "╔══════════════════════════════════════════════╗"
-    echo "║${NC}${CYAN}       Magicmail 邮件管理系统 v$(get_installed_version 2>/dev/null || echo '?.?.?')${CYAN}         ║"
-    echo "║           一键部署工具                        ║"
-    echo "╚══════════════════════════════════════════════╝"
-    echo -e "${NC}"
+    # ─── 主 Logo（青色粗体，figlet slant 字体）───────
+    printf '\033[1;36m'
+    cat << 'BANNER'
+    __  ___            _                      _ __
+   /  |/  /___ _____ _(_)________ ___  ____ _(_) /
+  / /|_/ / __ `/ __ `/ / ___/ __ `__ \/ __ `/ / / 
+ / /  / / /_/ / /_/ / / /__/ / / / / / /_/ / / /  
+/_/  /_/\__,_/\__, /_/\___/_/ /_/ /_/\__,_/_/_/   
+             /____/                              
+BANNER
+    printf '\033[0m'
+
+    # ─── 版本号 + 副标题框─────────────────────────────
+    # 中文字符为双宽度(×2)，内容区=8空格+6中文(12列)+8空格=28列
+    printf "\033[0;36m                              v%s\n" "${ver}"
+    printf '\033[1;37m'
+    printf '          ┌────────────────────────────┐\n'
+    printf '          │        一键部署工具        │\n'
+    printf '          └────────────────────────────┘\n'
+    printf '\033[0m\n'
 }
 
 # ═══════════════════════════════════════════════════════
@@ -903,7 +918,7 @@ error() { echo -e "\${RED}[ERROR]\${NC} \$*" >&2; }
 
 show_help() {
     echo ""
-    echo -e "\${CYAN}\${BOLD}Magicmail 邮件管理系统 - 命令行工具\${NC}"
+    echo -e "\${CYAN}\${BOLD}Magicmail 魔法邮箱 - 命令行工具\${NC}"
     echo ""
     echo "用法: magicmail <命令> [选项]"
     echo ""
@@ -1387,9 +1402,9 @@ cmd_doctor() {
         echo -e "  ${YELLOW}部分问题: ${passed_checks}/${total_checks} 通过, ${failed} 项需关注${NC}"
         echo ""
         echo "  建议:"
-        echo "  - 如服务未运行: ${CYAN}sudo magicmail start${NC}"
-        echo "  - 如缺少文件:   ${CYAN}sudo ./deploy.sh install${NC}"
-        echo "  - 如端口未监听: 检查日志: ${CYAN}sudo magicmail logs${NC}"
+        printf '  - 如服务未运行: \033[0;36msudo magicmail start\033[0m\n'
+        printf '  - 如缺少文件:   \033[0;36msudo ./deploy.sh install\033[0m\n'
+        printf '  - 如端口未监听: 检查日志: \033[0;36msudo magicmail logs\033[0m\n'
     fi
 
     echo ""

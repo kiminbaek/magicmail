@@ -289,7 +289,7 @@ docker pull magiccode1412/magicmail:latest
 # 运行
 docker run -d `
   -p 8080:8080 `
-  -v C:\magicmail\data:C:\data `
+  -v ./data:/app/data `
   --name magicmail `
   --restart unless-stopped `
   magiccode1412/magicmail:latest

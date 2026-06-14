@@ -139,7 +139,7 @@ export MAGICMAIL_HOST=0.0.0.0
 export MAGICMAIL_PORT=8080
 
 # 数据库
-export MAGICMAIL_DSN=/data/magicmail.db
+export MAGICMAIL_DSN=/app/data/magicmail.db
 
 # CORS（按需调整）
 export MAGICMAIL_CORS_ORIGINS="https://mail.yourdomain.com"

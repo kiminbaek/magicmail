@@ -308,7 +308,7 @@ nssm start magicmail
 **方式 C — Docker Desktop：**
 ```powershell
 docker pull magiccode1412/magicmail:latest
-docker run -d -p 8080:8080 -v C:\magicmail\data:C:\data --name magicmail --restart unless-stopped magiccode1412/magicmail:latest
+docker run -d -p 8080:8080 -v ./data:/app/data --name magicmail --restart unless-stopped magiccode1412/magicmail:latest
 ```
 
 详见 [安装部署 > Windows](https://160621.xyz/magicmail/guide/installation#方式四windows-部署)

@@ -46,7 +46,7 @@ ENV TZ=Asia/Shanghai
 
 # 创建非 root 用户
 RUN addgroup -S magicmail && \
-    adduser -S magicmail -G magicmail -h /data -s /sbin/nologin
+    adduser -S magicmail -G magicmail -h /app/data -s /sbin/nologin
 
 WORKDIR /app
 
@@ -54,12 +54,12 @@ WORKDIR /app
 COPY --from=backend-builder /magicmail /app/magicmail
 
 # 数据持久化目录
-RUN mkdir -p /data && chown magicmail:magicmail /data
+RUN mkdir -p /app/data && chown magicmail:magicmail /app/data
 
 USER magicmail
 
 # 数据库路径、监听端口
-ENV MAGICMAIL_DSN=/data/magicmail.db
+ENV MAGICMAIL_DSN=/app/data/magicmail.db
 
 EXPOSE 8080
 
