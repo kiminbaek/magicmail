@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -273,10 +274,11 @@ func (w *AccountWorker) syncOnce() {
 			Subject string `json:"subject"`
 			From    string `json:"from"`
 			SentAt  time.Time `json:"sent_at"`
-			Preview string `json:"preview"`
+			TextBody string `gorm:"column:text_body"` // 纯文本正文
+			HTMLBody string `gorm:"column:html_body"` // HTML 正文（fallback）
 		}
 		w.db.Table("mails").
-			Select("subject, `from`, sent_at, text_body").
+			Select("subject, `from`, sent_at, text_body, html_body").
 			Where("account_id = ?", w.account.ID).
 			Order("sent_at DESC").
 			Limit(count).
@@ -284,8 +286,11 @@ func (w *AccountWorker) syncOnce() {
 
 		mailList := make([]map[string]interface{}, len(latestMails))
 		for i, m := range latestMails {
-			// 预览：截取正文前 100 字符
-			preview := m.Preview
+			// 预览：优先纯文本，其次 HTML 去标签，截取前 100 字符
+			preview := m.TextBody
+			if preview == "" && m.HTMLBody != "" {
+				preview = stripHTML(m.HTMLBody)
+			}
 			if len(preview) > 100 { preview = preview[:100] + "..." }
 			mailList[i] = map[string]interface{}{
 				"subject": m.Subject,
@@ -295,15 +300,21 @@ func (w *AccountWorker) syncOnce() {
 			}
 		}
 
-		// 触发 Webhook 通知（包含邮件详情）
-		notifier.TriggerByEvent(w.db, "mail.received", map[string]interface{}{
-			"account_id":    w.account.ID,
-			"account_email": w.account.Email,
-			"account_name":  w.account.Name,
-			"protocol":      w.account.Protocol,
-			"mail_count":    count,
-			"mails":         mailList,
-		})
+		// 触发 Webhook 通知（每封邮件独立触发一次）
+		nowTs := fmt.Sprintf("%d", time.Now().Unix())
+		for _, mail := range mailList {
+			notifier.TriggerByEvent(w.db, "mail.received", map[string]interface{}{
+				"account_id":    w.account.ID,
+				"account_email": w.account.Email,
+				"account_name":  w.account.Name,
+				"protocol":      w.account.Protocol,
+				"subject":       mail["subject"],
+				"from":          mail["from"],
+				"sent_at":       mail["sent_at"],
+				"preview":       mail["preview"],
+				"timestamp":     nowTs,
+			})
+		}
 
 		// 推送 SSE 实时事件给前端
 		sse.PublishMailReceived(w.account.ID, w.account.Email, count, mailList)
@@ -500,4 +511,24 @@ func containsStr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// stripHTML 移除 HTML 标签，返回纯文本（用于 webhook preview fallback）
+func stripHTML(html string) string {
+	var result strings.Builder
+	inTag := false
+	for _, r := range html {
+		if r == '<' {
+			inTag = true
+			continue
+		}
+		if r == '>' {
+			inTag = false
+			continue
+		}
+		if !inTag {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
 }

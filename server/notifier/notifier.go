@@ -205,8 +205,11 @@ func RegisterPushNotifier(fn func(userID uint, title, body string, data any)) {
 
 // SendPushNotification 发送 Web Push 推送（供 IMAP Worker 调用）
 func SendPushNotification(userID uint, title, body string, data any) {
+	log.Printf("[Push-Bridge] SendPushNotification called (userID=%d, title=%q, body=%q)", userID, title, body)
 	if pushNotifier == nil {
+		log.Printf("[Push-Bridge] ⚠️ pushNotifier is NULL — RegisterPushNotifier 可能未被调用！")
 		return
 	}
 	pushNotifier(userID, title, body, data)
+	log.Printf("[Push-Bridge] ✓ pushNotifier 已调用完成")
 }

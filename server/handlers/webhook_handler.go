@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"magicmail/models"
+	"magicmail/notifier"
 	"magicmail/services"
 
 	"github.com/gofiber/fiber/v2"
@@ -187,6 +188,14 @@ func (h *WebhookHandler) SimulateMailReceived(c *fiber.Ctx) error {
 		})
 		triggeredCount++
 	}
+
+	// 触发 Web Push 离线推送
+	notifier.SendPushNotification(
+		1,
+		fmt.Sprintf("📧 模拟收到 %d 封新邮件", triggeredCount),
+		fmt.Sprintf("来自 %s", req.AccountEmail),
+		map[string]interface{}{"event": "simulate"},
+	)
 
 	return c.JSON(fiber.Map{
 		"success":     true,

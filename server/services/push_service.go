@@ -117,6 +117,7 @@ type PushPayload struct {
 
 // SendNotification 向指定用户的所有活跃订阅发送推送消息
 func (s *PushService) SendNotification(userID uint, title, body string, data any) {
+	log.Printf("[Push] SendNotification (userID=%d, title=%q)", userID, title)
 	payload := PushPayload{
 		Title: title,
 		Body:  body,
@@ -140,17 +141,22 @@ func (s *PushService) sendToUserSubscriptions(userID uint, payload PushPayload) 
 		log.Printf("[Push] 查询订阅失败 (userID=%d): %v", userID, err)
 		return
 	}
+	log.Printf("[Push] 找到 %d 个活跃订阅 (userID=%d)", len(subs), userID)
 	if len(subs) == 0 {
+		log.Printf("[Push] ⚠️ 无活跃订阅，推送被跳过 (userID=%d)。请确认前端已订阅 Web Push！", userID)
 		return
 	}
 
 	payloadBytes, _ := json.Marshal(payload)
 
 	for _, sub := range subs {
+		log.Printf("[Push] → 发送到 sub#%d endpoint=%s...", sub.ID, truncateEndpoint(sub.Endpoint))
 		go func(sub models.PushSubscription) {
 			if err := s.doSend(&sub, payloadBytes); err != nil {
 				log.Printf("[Push] 发送失败 (sub=%d): %v", sub.ID, err)
 				s.handleSendError(&sub, err)
+			} else {
+				log.Printf("[Push] ✓ 发送成功 (sub=%d)", sub.ID)
 			}
 		}(sub)
 	}
@@ -234,6 +240,12 @@ func containsStr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// truncateEndpoint 截断 endpoint 用于日志（隐藏敏感信息）
+func truncateEndpoint(ep string) string {
+	if len(ep) > 80 { return ep[:80] + "..." }
+	return ep
 }
 
 // encodeVAPIDPrivate 将 ECDSA 私钥编码为 base64rawurl 字符串（webpush-go 要求）

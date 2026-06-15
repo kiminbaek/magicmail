@@ -27,8 +27,12 @@ self.addEventListener('push', (event) => {
     badge: '/icons/icon-72x72.png',
     vibrate: [200, 100, 200],
     tag: data.tag || 'magicmail-mail',
-    requireInteraction: false,
+    requireInteraction: true,
     data: data.data || {},
+    actions: [
+      { action: 'view', title: '📬 查看邮件', icon: '/icons/icon-72x72.png' },
+      { action: 'close', title: '关闭' },
+    ],
   }
 
   event.waitUntil(
@@ -36,22 +40,32 @@ self.addEventListener('push', (event) => {
   )
 })
 
-// --- Notification Click：点击通知聚焦或打开应用窗口 ---
+// --- Notification Click/Action：点击通知或按钮时处理 ---
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
 
-  // 聚焦已有窗口，或打开新窗口
+  // 点击"关闭"按钮则不执行任何操作
+  if (event.action === 'close') {
+    return
+  }
+
+  const targetUrl = '/mails'
+
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // 如果已有打开的窗口，聚焦到它
+      // 如果已有打开的窗口，聚焦到它并可选导航到 /mails
       for (const client of clientList) {
-        if (client.url.includes('/mails') && 'focus' in client) {
+        if ('focus' in client) {
+          // 如果当前窗口不在 /mails，导航过去
+          if (!client.url.includes('/mails')) {
+            client.navigate(targetUrl)
+          }
           return client.focus()
         }
       }
-      // 没有邮件列表窗口则打开
+      // 没有已打开的窗口则打开新窗口
       if (self.clients.openWindow) {
-        return self.clients.openWindow('/mails')
+        return self.clients.openWindow(targetUrl)
       }
     })
   )
