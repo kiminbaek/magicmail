@@ -4,7 +4,9 @@
 package handlers
 
 import (
+	"fmt"
 	"strconv"
+	"time"
 
 	"magicmail/models"
 	"magicmail/services"
@@ -132,4 +134,64 @@ func (h *WebhookHandler) GetLogs(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"data": logs})
+}
+
+// SimulateMailReceived 模拟邮件接收，每封邮件独立触发一次通知
+func (h *WebhookHandler) SimulateMailReceived(c *fiber.Ctx) error {
+	var req struct {
+		AccountID    uint                     `json:"account_id"`
+		AccountEmail string                   `json:"account_email"`
+		AccountName  string                   `json:"account_name"`
+		MailCount    int                      `json:"mail_count"`
+		Mails        []map[string]interface{} `json:"mails"`
+	}
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "请求参数解析失败: " + err.Error()})
+	}
+
+	if req.AccountEmail == "" {
+		req.AccountEmail = "simulate@test.com"
+	}
+	if req.AccountName == "" {
+		req.AccountName = "模拟测试账号"
+	}
+
+	// 默认构造一封测试邮件（如果未提供）
+	if len(req.Mails) == 0 || req.MailCount == 0 {
+		req.Mails = []map[string]interface{}{
+			{
+				"subject": "\U0001f9ea 测试邮件",
+				"from":    "tester@example.com",
+				"sent_at": time.Now().Format("2006-01-02 15:04:05"),
+				"preview": "这是一封模拟的测试邮件，用于验证 webhook 通知配置。",
+			},
+		}
+		req.MailCount = 1
+	}
+
+	nowTs := fmt.Sprintf("%d", time.Now().Unix())
+	triggeredCount := 0
+
+	for _, mail := range req.Mails {
+		h.service.TriggerByEvent("mail.received", map[string]interface{}{
+			"account_id":    req.AccountID,
+			"account_email": req.AccountEmail,
+			"account_name":  req.AccountName,
+			"protocol":      "imap",
+			"subject":       mail["subject"],
+			"from":          mail["from"],
+			"sent_at":       mail["sent_at"],
+			"preview":       mail["preview"],
+			"timestamp":     nowTs,
+		})
+		triggeredCount++
+	}
+
+	return c.JSON(fiber.Map{
+		"success":     true,
+		"message":     fmt.Sprintf("已触发 %d 条邮件通知", triggeredCount),
+		"total_mails": triggeredCount,
+		"event":       "mail.received",
+	})
 }

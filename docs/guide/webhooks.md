@@ -26,22 +26,26 @@ Body 模板中可以使用以下变量：
 | 变量 | 说明 |
 |------|------|
 | <span v-pre>`{{event}}`</span> | 事件名称（如 `mail.received`） |
-| <span v-pre>`{{timestamp}}`</span> | 触发时间（Unix 时间戳） |
+| <span v-pre>`{{timestamp}}`</span> | 触发时间（Unix 时间戳字符串） |
+| <span v-pre>`{{data.subject}}`</span> | 邮件主题 |
+| <span v-pre>`{{data.from}}`</span> | 发件人地址 |
+| <span v-pre>`{{data.sent_at}}`</span> | 邮件发送时间 |
+| <span v-pre>`{{data.preview}}`</span> | 正文预览（前 100 字） |
 | <span v-pre>`{{data.account_id}}`</span> | 邮箱账号 ID |
 | <span v-pre>`{{data.account_email}}`</span> | 邮箱地址 |
 | <span v-pre>`{{data.account_name}}`</span> | 邮箱显示名称 |
 | <span v-pre>`{{data.protocol}}`</span> | 协议类型（imap / pop3） |
-| <span v-pre>`{{data.mail_count}}`</span> | 本次新邮件数量 |
-| <span v-pre>`{{data.mails}}`</span> | 邮件列表 JSON 数组，每项包含 `subject`、`from`、`sent_at`、`preview` |
 
-> 注意：邮件详情以 JSON 数组形式嵌套在 `data.mails` 中，单条邮件的字段为 `subject`（主题）、`from`（发件人）、`sent_at`（发送时间）、`preview`（正文预览前 100 字）。模板中无法直接使用扁平的 <span v-pre>`{{subject}}`</span> 等变量。
+::: tip 每封独立触发
+每收到一封新邮件，会独立触发一次 Webhook 推送。模板中可直接使用扁平化的单封邮件字段。
+:::
 
 ### 示例：[魔法推送](https://github.com/magiccode1412/magicpush)
 
 ```json
 {
-  "title": "📧 新邮件通知 - {{data.account_name}}",
-  "content": "## 📧 收到 {{data.mail_count}} 封新邮件\n\n**来源：** {{data.account_name}} <{{data.account_email}}>\n**时间：** {{data.timestamp}}\n\n### 邮件列表\n\n{{data.mails}}",
+  "title": "📧 {{data.subject}}",
+  "content": "**来自:** {{data.from}}\n**时间:** {{data.sent_at}}\n\n{{data.preview}}",
   "type": "markdown"
 }
 ```
@@ -52,7 +56,7 @@ Body 模板中可以使用以下变量：
 {
   "msg_type": "text",
   "content": {
-    "text": "📧 收到 {{data.mail_count}} 封新邮件\n账号：{{data.account_name}} <{{data.account_email}}>\n邮件列表：{{data.mails}}"
+    "text": "📧 {{data.subject}}\n来自：{{data.from}}\n{{data.preview}}"
   }
 }
 ```
@@ -63,8 +67,8 @@ Body 模板中可以使用以下变量：
 {
   "msgtype": "markdown",
   "markdown": {
-    "title": "📧 新邮件 - {{data.account_name}}",
-    "text": "### 📧 收到 {{data.mail_count}} 封新邮件\n> **账号：** {{data.account_name}} <{{data.account_email}}>\n> **时间：** {{data.timestamp}}\n\n#### 邮件列表\n{{data.mails}}"
+    "title": "📧 {{data.subject}}",
+    "text": "> **来自：** {{data.from}}\n> **时间：** {{data.sent_at}}\n\n{{data.preview}}"
   }
 }
 ```

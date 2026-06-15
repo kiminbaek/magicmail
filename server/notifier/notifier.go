@@ -74,7 +74,12 @@ func TriggerByEvent(db *gorm.DB, event string, data map[string]interface{}) {
 				"last_trigger_at": now,
 				"error_msg":      errMsg,
 			})
-			log.Printf("[Webhook] %s -> %s (%dms) %s", event, hook.URL, result.Duration, status)
+			log.Printf("[Webhook] %s -> %s (%dms) %s%s", event, hook.URL, result.Duration, status, func() string {
+			if status == "error" && result.ErrorMsg != "" {
+				return " | " + result.ErrorMsg
+			}
+			return ""
+		}())
 		}(h)
 	}
 }
@@ -98,7 +103,6 @@ func dispatch(h *hookInfo, payload Payload, event string) *dispatchResult {
 	var bodyBytes []byte
 	var err error
 	if h.Body != "" {
-		// 自定义 body：尝试作为 JSON 发送，支持模板变量 {{event}} {{timestamp}} {{data.xxx}}
 		bodyStr := RenderBodyTemplate(h.Body, event, payload.Timestamp, payload.Data)
 		bodyBytes = []byte(bodyStr)
 	} else {
@@ -152,7 +156,11 @@ func dispatch(h *hookInfo, payload Payload, event string) *dispatchResult {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		result.Success = true
 	} else {
-		result.ErrorMsg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		bodyPreview := string(respBody)
+		if len(bodyPreview) > 300 {
+			bodyPreview = bodyPreview[:300] + "..."
+		}
+		result.ErrorMsg = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, bodyPreview)
 	}
 	return result
 }

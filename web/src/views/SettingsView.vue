@@ -130,6 +130,10 @@
           <button class="btn btn-primary btn-sm" @click="showForm = true; editingHook = null; resetForm()">
             + 添加 Webhook
           </button>
+          <button class="btn btn-secondary btn-sm" @click="simulateMailAction" :disabled="simulatingMail">
+            <span v-if="simulatingMail" class="spinner-xs"></span>
+            📨 模拟接收邮件
+          </button>
         </div>
 
         <!-- Webhook 列表 -->
@@ -208,12 +212,19 @@
                   </div>
                   <div class="form-field" style="grid-column: 1 / -1;">
                     <label>自定义 Body（JSON 模板）</label>
-                    <textarea v-model="form.body" rows="3" placeholder='{"title":"📧 新邮件通知 - {{data.account_name}}","content":"## 📧 收到 {{data.mail_count}} 封新邮件\n\n**来源：** {{data.account_name}} <{{data.account_email}}>\n**时间：** {{data.timestamp}}\n\n### 邮件列表\n\n{{data.mails}}","type":"markdown"}' ></textarea>
+                    <textarea v-model="form.body" rows="3" placeholder='{"title":"📧 {{data.subject}}","content":"**来自:** {{data.from}}\n**时间:** {{data.sent_at}}\n\n{{data.preview}}","type":"markdown"}' ></textarea>
                     <small class="field-hint">可选，留空则使用默认结构。支持模板变量：&#123;{event}}、&#123;{timestamp}}、&#123;{data.xxx}}</small>
                   </div>
                 </div>
               </div>
               <div class="modal-footer">
+                <a href="https://www.160621.xyz/magicmail/guide/webhooks.html" target="_blank" rel="noopener" class="doc-link">
+                  📖 参考文档
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="display: inline-block; vertical-align: middle;">
+                    <path d="M9 3L4.5 7.5M4.5 7.5L9 12M4.5 7.5H1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                  </svg>
+                </a>
+                <div style="flex:1"></div>
                 <button class="btn btn-secondary btn-sm" @click="closeModal">取消</button>
                 <button class="btn btn-primary btn-sm" @click="saveHook" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
               </div>
@@ -540,6 +551,7 @@ const showForm = ref(false)
 const editingHook = ref(null)
 const saving = ref(false)
 const testingId = ref(null)
+const simulatingMail = ref(false)
 
 const form = ref({
   name: '',
@@ -632,6 +644,23 @@ async function testWebhookAction(id) {
     toast.error('测试请求失败: ' + e.message)
   } finally {
     testingId.value = null
+  }
+}
+
+async function simulateMailAction() {
+  simulatingMail.value = true
+  try {
+    const res = await webhookApi.simulateMailReceived()
+    if (res.success) {
+      toast.show(`${res.message}（事件: ${res.event}）`, 'success', 5000)
+      fetchWebhooks() // 刷新列表以更新 last_trigger_at
+    } else {
+      toast.error(res.error || '模拟触发失败')
+    }
+  } catch (e) {
+    toast.error('模拟请求失败: ' + e.message)
+  } finally {
+    simulatingMail.value = false
   }
 }
 
@@ -1240,11 +1269,22 @@ async function clearCache() {
 
 .modal-footer {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: var(--space-sm);
   padding: var(--space-md) var(--space-xl);
   border-top: 1px solid var(--border-light);
 }
+.doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--primary-500);
+  text-decoration: none;
+  margin-right: auto;
+}
+.doc-link:hover { color: var(--primary-600); text-decoration: underline; }
 
 .form-grid {
   display: grid;

@@ -37,6 +37,11 @@ export function testWebhook(id) {
   return request.post(`/webhooks/${id}/test`)
 }
 
+/** 模拟邮件接收，触发完整通知链路（Webhook + SSE + Web Push） */
+export function simulateMailReceived(data = {}) {
+  return request.post('/webhooks/simulate-mail', data)
+}
+
 /** 获取 Webhook 推送日志 */
 export function getWebhookLogs(id, limit = 20) {
   return request.get(`/webhooks/${id}/logs`, { params: { limit } })

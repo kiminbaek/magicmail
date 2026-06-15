@@ -137,6 +137,8 @@ func Register(app *fiber.App, db *gorm.DB) {
 	webhooks := protected.Group("/webhooks")
 	webhooks.Get("", webhookHandler.List)
 	webhooks.Post("", webhookHandler.Create)
+	// 静态路由必须在参数路由之前注册（避免 /simulate-mail 被 :id 捕获）
+	webhooks.Post("/simulate-mail", webhookHandler.SimulateMailReceived)
 	webhooks.Get("/:id", webhookHandler.Get)
 	webhooks.Put("/:id", webhookHandler.Update)
 	webhooks.Delete("/:id", webhookHandler.Delete)
