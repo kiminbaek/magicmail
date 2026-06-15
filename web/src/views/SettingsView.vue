@@ -100,15 +100,15 @@
             <strong>轮询间隔</strong>
             <small>SSE 不可用时的定时刷新间隔</small>
           </div>
-          <div class="poll-options">
-            <button
-              v-for="opt in pollOptions"
-              :key="opt.value"
-              class="poll-btn"
-              :class="{ active: currentPollInterval === opt.value }"
-              @click="setPollInterval(opt.value)"
-            >{{ opt.label }}</button>
-          </div>
+          <select
+            class="poll-select"
+            :value="currentPollInterval"
+            @change="setPollInterval(Number($event.target.value))"
+          >
+            <option v-for="opt in pollOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
         </div>
 
         <div class="setting-row">
@@ -1100,8 +1100,26 @@ async function clearCache() {
   .theme-options {
     grid-template-columns: 1fr;
   }
-  
+
   .settings-section { padding: var(--space-lg); }
+
+  /* 渲染模式 / 字体大小等宽控件行：移动端改为上下堆叠 */
+  .setting-row:has(.render-mode-options),
+  .setting-row:has(.font-size-options) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-sm);
+  }
+
+  .render-mode-options {
+    flex-direction: column;
+    width: 100%;
+    min-width: unset;
+  }
+  .render-mode-btn {
+    width: 100%;
+    box-sizing: border-box;
+  }
 }
 
 /* ---- Webhook 通知 ---- */
@@ -1377,29 +1395,23 @@ async function clearCache() {
 .connection-status.status-unknown .status-text { color: #64748b; }
 
 /* ---- 轮询间隔选择器 ---- */
-.poll-options {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
-.poll-btn {
-  padding: 6px 14px;
+.poll-select {
+  padding: 6px 12px;
   border: 1px solid var(--border-color);
   background: var(--bg-secondary);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: var(--font-size-sm);
   font-family: inherit;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: border-color var(--transition-fast);
+  flex-shrink: 0;
 }
-.poll-btn:hover { border-color: var(--primary-300); }
-.poll-btn.active {
+.poll-select:hover { border-color: var(--primary-300); }
+.poll-select:focus {
+  outline: none;
   border-color: var(--primary-500);
-  background: var(--mail-unread-bg);
-  color: var(--primary-600);
-  font-weight: var(--font-weight-medium);
+  box-shadow: 0 0 0 2px var(--primary-200);
 }
 
 .next-refresh {
