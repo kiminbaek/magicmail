@@ -326,6 +326,11 @@ async function handleDelete(id) {
   if (!confirm('确定要删除这封邮件吗？')) return
   try {
     const res = await mailStore.deleteMail(id)
+    // 刷新统计信息（更新菜单栏和标签计数器）
+    await Promise.all([
+      accountStore.fetchAccounts(),
+      mailStore.fetchStats()
+    ])
     // 检查同步删除状态
     if (res?.deleted_from_server) {
       toast.success('邮件已删除，并已从源服务器同步删除')
@@ -400,6 +405,11 @@ async function handleBatchDelete() {
     }
 
     clearSelection()
+    // 刷新统计信息（更新菜单栏和标签计数器）
+    await Promise.all([
+      accountStore.fetchAccounts(),
+      mailStore.fetchStats()
+    ])
   } catch (e) {
     toast.error('批量删除失败: ' + e.message)
   }

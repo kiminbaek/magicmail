@@ -171,6 +171,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAccountStore } from '@/stores/accountStore'
+import { useMailStore } from '@/stores/mailStore'
 
 const props = defineProps({
   collapsed: Boolean,
@@ -180,11 +181,13 @@ const emit = defineEmits(['toggle', 'navigate'])
 
 const route = useRoute()
 const accountStore = useAccountStore()
+const mailStore = useMailStore()
 
 const mobileOpen = ref(false)
 const isMobile = ref(window.innerWidth <= 1024)
 
-const unreadCount = computed(() => accountStore.totalUnread)
+// 统一使用 mailStore.stats 作为未读数据源（与邮件列表页同步）
+const unreadCount = computed(() => mailStore.stats?.unread || 0)
 const open = computed(() => {
   return isMobile.value && mobileOpen.value
 })

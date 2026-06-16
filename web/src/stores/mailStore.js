@@ -83,6 +83,10 @@ export const useMailStore = defineStore('mail', () => {
   // --- 标记已读/未读 ---
   async function markAsRead(id, isRead) {
     try {
+      // 获取操作前的状态用于计算计数变化
+      const mail = mails.value.find(m => m.id === id)
+      const wasUnread = mail ? !mail.is_read : false
+
       await apiMarkRead(id, isRead)
       // 更新本地状态
       const idx = mails.value.findIndex(m => m.id === id)
@@ -92,6 +96,15 @@ export const useMailStore = defineStore('mail', () => {
       if (currentMail.value?.id === id) {
         currentMail.value.is_read = isRead
       }
+
+      // 同步更新未读计数器
+      if (wasUnread && isRead) {
+        // 未读 → 已读：计数减 1
+        stats.value = { ...stats.value, unread: Math.max(0, (stats.value.unread || 0) - 1) }
+      } else if (!wasUnread && !isRead) {
+        // 已读 → 未读：计数加 1
+        stats.value = { ...stats.value, unread: (stats.value.unread || 0) + 1 }
+      }
     } catch (e) {
       console.error('[mailStore] 标记已读失败:', e.message)
     }
@@ -100,9 +113,14 @@ export const useMailStore = defineStore('mail', () => {
   // --- 删除邮件 ---
   async function deleteMail(id) {
     try {
+      const deletedMail = mails.value.find(m => m.id === id)
       const res = await apiDeleteMail(id)
       mails.value = mails.value.filter(m => m.id !== id)
       total.value--
+      // 更新统计信息（未读计数等）
+      if (deletedMail && !deletedMail.is_read) {
+        stats.value = { ...stats.value, unread: Math.max(0, (stats.value.unread || 0) - 1) }
+      }
       return res
     } catch (e) {
       console.error('[mailStore] 删除邮件失败:', e.message)
@@ -113,10 +131,16 @@ export const useMailStore = defineStore('mail', () => {
   // --- 批量删除邮件 ---
   async function batchDeleteMails(ids) {
     try {
+      // 统计被删除的未读邮件数
+      const deletedMails = mails.value.filter(m => ids.includes(m.id))
+      const unreadDeleted = deletedMails.filter(m => !m.is_read).length
+
       const res = await apiBatchDelete(ids)
       const idSet = new Set(ids)
       mails.value = mails.value.filter(m => !idSet.has(m.id))
       total.value -= res.deleted || ids.length
+      // 更新统计信息（未读计数等）
+      stats.value = { ...stats.value, unread: Math.max(0, (stats.value.unread || 0) - unreadDeleted) }
       return res
     } catch (e) {
       console.error('[mailStore] 批量删除失败:', e.message)
