@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"unicode"
 
 	"magicmail/models"
 
@@ -66,63 +65,8 @@ func Init(dsn string) *gorm.DB {
 		log.Fatalf("❌ 数据库迁移失败: %v", err)
 	}
 
-	// 清理历史遗留的多余列（Host 字段曾短暂映射到 host 导致 AutoMigrate 多建）
-	cleanOrphanColumns(db)
-
-	// 补充可能缺失的 VAPID 密钥列（AutoMigrate 对已有表新增列有时不生效）
-	ensureVAPIDColumns(db)
-
 	fmt.Println("✅ 数据库初始化成功:", dsn)
 	return db
-}
-
-// cleanOrphanColumns 清理 AutoMigrate 可能遗留的多余列
-func cleanOrphanColumns(db *gorm.DB) {
-	// mail_accounts 表：Host 字段正确映射为 imap_host，删除多余的 host 列
-	var colType string
-	if err := db.Raw("SELECT type FROM pragma_table_info('mail_accounts') WHERE name = 'host'").Scan(&colType).Error; err == nil && colType != "" {
-		if err := db.Exec("ALTER TABLE mail_accounts DROP COLUMN host").Error; err != nil {
-			log.Printf("⚠️ 清理多余列 host 失败（可忽略）: %v", err)
-		} else {
-			log.Println("🧹 已清理 mail_accounts 多余列: host")
-		}
-	}
-}
-
-// ensureVAPIDColumns 确保 app_configs 表包含 VAPID 密钥列（AutoMigrate 对已有表新增字段可能不生效）
-func ensureVAPIDColumns(db *gorm.DB) {
-	columns := []struct{ name, typ string }{
-		{"vapid_public_key", "TEXT DEFAULT ''"},
-		{"vapid_private_key", "TEXT DEFAULT ''"},
-	}
-	for _, col := range columns {
-		var exists string
-		if err := db.Raw("SELECT name FROM pragma_table_info('app_configs') WHERE name = ?", col.name).Scan(&exists).Error; err != nil || exists == "" {
-			// 安全验证：确保列名为合法的 SQL 标识符
-			if !isValidSQLIdentifier(col.name) {
-				log.Printf("⚠️ 无效的列名: %s，跳过添加", col.name)
-				continue
-			}
-			if err := db.Exec("ALTER TABLE app_configs ADD COLUMN \"" + col.name + "\" " + col.typ).Error; err != nil {
-				log.Printf("⚠️ 添加列 %s 失败: %v", col.name, err)
-			} else {
-				log.Printf("✅ 已补充 app_configs 列: %s", col.name)
-			}
-		}
-	}
-}
-
-// isValidSQLIdentifier 验证字符串是否为合法的 SQL 标识符（仅允许字母、数字、下划线）
-func isValidSQLIdentifier(s string) bool {
-	if len(s) == 0 {
-		return false
-	}
-	for i, r := range s {
-		if !(unicode.IsLetter(r) || (i > 0 && unicode.IsDigit(r)) || r == '_') {
-			return false
-		}
-	}
-	return true
 }
 
 // EnsureSecuritySecrets 确保安全密钥存在：
