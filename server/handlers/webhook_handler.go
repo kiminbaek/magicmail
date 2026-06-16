@@ -184,6 +184,8 @@ func (h *WebhookHandler) SimulateMailReceived(c *fiber.Ctx) error {
 			"from":          mail["from"],
 			"sent_at":       mail["sent_at"],
 			"preview":       mail["preview"],
+			"text_body":     mail["text_body"],
+			"html_body":     mail["html_body"],
 			"timestamp":     nowTs,
 		})
 		triggeredCount++

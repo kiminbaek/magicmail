@@ -27,9 +27,10 @@ import (
 
 // Fetcher 邮件拉取器 - 负责从 IMAP 服务器拉取邮件并解析存储
 type Fetcher struct {
-	db     *gorm.DB
-	config *config.Config
-	folder string // 当前同步的文件夹名（inbox/sent）
+	db            *gorm.DB
+	config        *config.Config
+	folder        string // 当前同步的文件夹名（inbox/sent）
+	SyncedMailIDs []uint // 本次同步成功入库的邮件ID列表（精确追踪，用于webhook）
 }
 
 // NewFetcher 创建拉取器实例
@@ -53,6 +54,8 @@ func (f *Fetcher) SyncSentMailbox(client *IMAPClient) (int, error) {
 // syncMailbox 同步指定邮箱账号的指定 IMAP 文件夹
 func (f *Fetcher) syncMailbox(client *IMAPClient, mailboxName, folder string) (int, error) {
 	f.folder = folder
+	// 注意：不在此处重置 SyncedMailIDs，由调用方（worker）在创建 Fetcher 后统一管理
+	// 因为同一 Fetcher 可能被多次调用（INBOX + Sent），需要累积所有ID
 
 	mbox, err := client.SelectMailbox(mailboxName)
 	if err != nil {
@@ -123,11 +126,15 @@ func (f *Fetcher) syncMailbox(client *IMAPClient, mailboxName, folder string) (i
 			continue // 已存在（去重跳过）
 		}
 
-		// ⭐ 邮件和附件已在 parseMessage 中统一入库，无需额外操作
+		// ⭐ 记录本次成功入库的邮件ID（用于精确触发 webhook）
+		f.SyncedMailIDs = append(f.SyncedMailIDs, parsed.ID)
+		log.Printf("✅ [%s] 入库邮件 ID=%d, UID=%d, subject=%q", f.folder, parsed.ID, buf.UID, parsed.Subject)
+
+		// 邮件和附件已在 parseMessage 中统一入库，无需额外操作
 		newCount++
 	}
 
-	log.Printf("📬 同步完成 %s (模式=%s): 新增/更新 %d 封邮件", client.Account.Email, syncMode, newCount)
+	log.Printf("📬 同步完成 %s (模式=%s): 新增/更新 %d 封邮件, IDs=%v", client.Account.Email, syncMode, newCount, f.SyncedMailIDs)
 	return newCount, nil
 }
 

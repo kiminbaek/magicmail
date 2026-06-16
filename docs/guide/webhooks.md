@@ -29,8 +29,12 @@ Body 模板中可以使用以下变量：
 | <span v-pre>`{{timestamp}}`</span> | 触发时间（Unix 时间戳字符串） |
 | <span v-pre>`{{data.subject}}`</span> | 邮件主题 |
 | <span v-pre>`{{data.from}}`</span> | 发件人地址 |
+| <span v-pre>`{{data.to}}`</span> | 收件人地址 |
+| <span v-pre>`{{data.cc}}`</span> | 抄送地址 |
 | <span v-pre>`{{data.sent_at}}`</span> | 邮件发送时间 |
-| <span v-pre>`{{data.preview}}`</span> | 正文预览（前 100 字） |
+| <span v-pre>`{{data.preview}}`</span> | 正文预览（前 200 字） |
+| <span v-pre>`{{data.text_body}}`</span> | 纯文本正文（完整） |
+| <span v-pre>`{{data.html_body}}`</span> | HTML 正文（完整） |
 | <span v-pre>`{{data.account_id}}`</span> | 邮箱账号 ID |
 | <span v-pre>`{{data.account_email}}`</span> | 邮箱地址 |
 | <span v-pre>`{{data.account_name}}`</span> | 邮箱显示名称 |
@@ -45,31 +49,8 @@ Body 模板中可以使用以下变量：
 ```json
 {
   "title": "📧 {{data.subject}}",
-  "content": "**来自:** {{data.from}}\n**时间:** {{data.sent_at}}\n\n{{data.preview}}",
-  "type": "markdown"
-}
-```
-
-### 示例：飞书机器人
-
-```json
-{
-  "msg_type": "text",
-  "content": {
-    "text": "📧 {{data.subject}}\n来自：{{data.from}}\n{{data.preview}}"
-  }
-}
-```
-
-### 示例：钉钉机器人
-
-```json
-{
-  "msgtype": "markdown",
-  "markdown": {
-    "title": "📧 {{data.subject}}",
-    "text": "> **来自：** {{data.from}}\n> **时间：** {{data.sent_at}}\n\n{{data.preview}}"
-  }
+  "content": "发件： {{data.from}}\n收件：{{data.to}}\n时间：{{data.sent_at}}",
+  "type": "text"
 }
 ```
 

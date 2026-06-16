@@ -234,6 +234,7 @@ func (w *AccountWorker) syncOnce() {
 
 	// 根据协议选择对应的拉取器执行同步
 	var count int
+	var syncedIDs []uint // 本次同步成功入库的邮件ID（webhook精确推送用）
 	if w.isIMAP() {
 		// IMAP 同步（INBOX + Sent）
 		imapClient := client.(*IMAPClient)
@@ -245,11 +246,13 @@ func (w *AccountWorker) syncOnce() {
 				count += sentCount
 			}
 		}
+		syncedIDs = fetcher.SyncedMailIDs // IMAP: 从 Fetcher 获取精确ID
 	} else {
 		// POP3 同步
 		pop3Client := client.(*pop3pkg.POP3Client)
 		pop3Fetcher := pop3pkg.NewPOP3Fetcher(w.db, w.config)
 		count, err = pop3Fetcher.SyncMailbox(pop3Client)
+		syncedIDs = pop3Fetcher.SyncedMailIDs // POP3: 从 POP3Fetcher 获取精确ID
 	}
 
 	if err != nil {
@@ -269,34 +272,55 @@ func (w *AccountWorker) syncOnce() {
 	if count > 0 {
 		log.Printf("📬 %s 同步完成: 新增 %d 封邮件", w.account.Email, count)
 
-		// 查询最新邮件详情用于 webhook 推送
+		// ⭐ 使用精确的邮件ID列表查询（而非 Limit(count) 近似查询）
+		// 解决 webhook 重复/漏发问题：count 可能是 INBOX+Sent 的总和，且按 sent_at 排序不可靠
+		if len(syncedIDs) == 0 {
+			log.Printf("⚠️  %s 有新增邮件但无ID记录，跳过 webhook", w.account.Email)
+			return
+		}
+
+		log.Printf("🔍 [WEBHOOK] 准备为 %d 个邮件ID发送通知: %v", len(syncedIDs), syncedIDs)
+
+		// 验证：检查DB中这些ID是否真实存在
+		var dbCount int64
+		w.db.Table("mails").Where("id IN ?", syncedIDs).Count(&dbCount)
+		log.Printf("🔍 [WEBHOOK] DB中实际存在的邮件数: %d (计划查 %d 封)", dbCount, len(syncedIDs))
+
 		var latestMails []struct {
-			Subject string `json:"subject"`
-			From    string `json:"from"`
-			SentAt  time.Time `json:"sent_at"`
-			TextBody string `gorm:"column:text_body"` // 纯文本正文
-			HTMLBody string `gorm:"column:html_body"` // HTML 正文（fallback）
+			ID       uint      `gorm:"column:id"`
+			Subject  string    `json:"subject"`
+			From     string    `json:"from"`
+			To       string    `gorm:"column:to"`       // 收件人
+			Cc       string    `gorm:"column:cc"`       // 抄送
+			SentAt   time.Time `json:"sent_at"`
+			TextBody string    `gorm:"column:text_body"` // 纯文本正文
+			HTMLBody string    `gorm:"column:html_body"` // HTML 正文（fallback）
 		}
 		w.db.Table("mails").
-			Select("subject, `from`, sent_at, text_body, html_body").
-			Where("account_id = ?", w.account.ID).
+			Select("id, subject, `from`, `to`, cc, sent_at, text_body, html_body").
+			Where("id IN ?", syncedIDs).
 			Order("sent_at DESC").
-			Limit(count).
 			Find(&latestMails)
+
+		log.Printf("🔍 [WEBHOOK] DB查询返回 %d 封邮件 (预期 %d)", len(latestMails), len(syncedIDs))
 
 		mailList := make([]map[string]interface{}, len(latestMails))
 		for i, m := range latestMails {
-			// 预览：优先纯文本，其次 HTML 去标签，截取前 100 字符
+			// 预览：优先纯文本，其次 HTML 去标签，截取前 200 字符
 			preview := m.TextBody
 			if preview == "" && m.HTMLBody != "" {
 				preview = stripHTML(m.HTMLBody)
 			}
-			if len(preview) > 100 { preview = preview[:100] + "..." }
+			if len(preview) > 200 { preview = preview[:200] + "..." }
 			mailList[i] = map[string]interface{}{
-				"subject": m.Subject,
-				"from":    m.From,
-				"sent_at": m.SentAt.Format("2006-01-02 15:04:05"),
-				"preview": preview,
+				"subject":   m.Subject,
+				"from":      m.From,
+				"to":        m.To,
+				"cc":        m.Cc,
+				"sent_at":   m.SentAt.Format("2006-01-02 15:04:05"),
+				"preview":   preview,
+				"text_body": m.TextBody,
+				"html_body": m.HTMLBody,
 			}
 		}
 
@@ -310,8 +334,12 @@ func (w *AccountWorker) syncOnce() {
 				"protocol":      w.account.Protocol,
 				"subject":       mail["subject"],
 				"from":          mail["from"],
+				"to":            mail["to"],
+				"cc":            mail["cc"],
 				"sent_at":       mail["sent_at"],
 				"preview":       mail["preview"],
+				"text_body":     mail["text_body"],
+				"html_body":     mail["html_body"],
 				"timestamp":     nowTs,
 			})
 		}
@@ -514,10 +542,41 @@ func containsStr(s, substr string) bool {
 }
 
 // stripHTML 移除 HTML 标签，返回纯文本（用于 webhook preview fallback）
+// 会完整移除 <style> 和 <script> 标签及其内部内容，避免 CSS/JS 代码泄漏到预览文本中
 func stripHTML(html string) string {
+	s := html
+
+	// 1. 先移除 <style>...</style> 和 <script>...</script> 块（大小写不敏感）
+	for _, tag := range []string{"style", "script"} {
+		for {
+			lower := strings.ToLower(s)
+			startTag := "<" + tag
+			endTag := "</" + tag + ">"
+
+			startIdx := strings.Index(lower, startTag)
+			if startIdx == -1 {
+				break
+			}
+			// 找到起始标签的 '>' 位置
+			startClose := strings.Index(s[startIdx:], ">")
+			if startClose == -1 {
+				break
+			}
+			contentStart := startIdx + startClose + 1
+			endIdx := strings.Index(strings.ToLower(s[contentStart:]), endTag)
+			if endIdx == -1 {
+				// 没有闭合标签，只移除到末尾
+				s = s[:startIdx]
+				break
+			}
+			s = s[:startIdx] + s[contentStart+endIdx+len(endTag):]
+		}
+	}
+
+	// 2. 移除剩余 HTML 标签
 	var result strings.Builder
 	inTag := false
-	for _, r := range html {
+	for _, r := range s {
 		if r == '<' {
 			inTag = true
 			continue
@@ -530,5 +589,21 @@ func stripHTML(html string) string {
 			result.WriteRune(r)
 		}
 	}
-	return result.String()
+
+	// 3. 清理多余空白：将连续空白替换为单个空格
+	raw := result.String()
+	var cleaned strings.Builder
+	prevSpace := false
+	for _, r := range raw {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			if !prevSpace {
+				cleaned.WriteRune(' ')
+				prevSpace = true
+			}
+		} else {
+			cleaned.WriteRune(r)
+			prevSpace = false
+		}
+	}
+	return strings.TrimSpace(cleaned.String())
 }

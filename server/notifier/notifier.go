@@ -95,9 +95,47 @@ func matchEvent(eventsRaw, event string) bool {
 	return false
 }
 
-// dispatch 执行 HTTP POST
+// dispatch 执行 HTTP POST（带重试：网络错误和 5xx 最多重试 3 次）
 func dispatch(h *hookInfo, payload Payload, event string) *dispatchResult {
+	const maxRetries = 3
 	start := time.Now()
+	var lastResult *dispatchResult
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<uint(attempt-1)) * time.Second // 1s, 2s, 4s
+			log.Printf("[Webhook] 第 %d 次重试 %s (等待 %v)...", attempt, h.URL, backoff)
+			time.Sleep(backoff)
+		}
+
+		result := doDispatch(h, payload, event)
+		lastResult = result
+
+		// 成功 → 直接返回
+		if result.Success {
+			result.Duration = time.Since(start).Milliseconds()
+			return result
+		}
+
+		// 4xx 客户端错误不重试（请求本身有问题）
+		if result.StatusCode >= 400 && result.StatusCode < 500 {
+			result.Duration = time.Since(start).Milliseconds()
+			return result
+		}
+
+		// 网络错误或 5xx → 继续重试
+		if attempt < maxRetries {
+			log.Printf("[Webhook] ⚠️ %s 失败 (尝试 %d/%d): %s", h.URL, attempt+1, maxRetries+1, result.ErrorMsg)
+		}
+	}
+
+	lastResult.Duration = time.Since(start).Milliseconds()
+	lastResult.ErrorMsg = fmt.Sprintf("重试 %d 次后仍失败: %s", maxRetries, lastResult.ErrorMsg)
+	return lastResult
+}
+
+// doDispatch 单次 HTTP POST 请求（无重试）
+func doDispatch(h *hookInfo, payload Payload, event string) *dispatchResult {
 	result := &dispatchResult{}
 
 	var bodyBytes []byte
@@ -141,8 +179,6 @@ func dispatch(h *hookInfo, payload Payload, event string) *dispatchResult {
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
-	result.Duration = time.Since(start).Milliseconds()
-
 	if err != nil {
 		result.ErrorMsg = "请求失败: " + err.Error()
 		return result

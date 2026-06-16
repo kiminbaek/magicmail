@@ -172,6 +172,10 @@ function generateThemePalette(baseHex, isDark) {
 
       // ---- 主题色阴影光晕 ----
       '--shadow-glow': cssHSLA(h, s, 58, 0.22),
+
+      // ---- 批量选择栏 ----
+      '--batch-bar-bg': cssHSLA(h, s * 0.75, 68, 0.07),
+      '--batch-bar-border': cssHSLA(h, s * 0.78, 62, 0.16),
     }
 
   } else {
@@ -245,6 +249,10 @@ function generateThemePalette(baseHex, isDark) {
 
       // ---- 主题色阴影光晕 ----
       '--shadow-glow': cssHSLA(h, s, 55, 0.28),
+
+      // ---- 批量选择栏（暗底 + 主题色辉光，避免过亮）----
+      '--batch-bar-bg': cssHSLA(h, s * 0.78, 54, 0.12),
+      '--batch-bar-border': cssHSLA(h, s * 0.80, 56, 0.18),
     }
   }
 }

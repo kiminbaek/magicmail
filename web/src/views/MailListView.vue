@@ -521,8 +521,8 @@ function stopRefreshTimer() {
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  background: var(--primary-50, rgba(79, 110, 247, 0.06));
-  border: 1px solid var(--primary-200, rgba(79, 110, 247, 0.2));
+  background: var(--batch-bar-bg, var(--primary-50, rgba(79, 110, 247, 0.06)));
+  border: 1px solid var(--batch-bar-border, var(--primary-200, rgba(79, 110, 247, 0.2)));
   border-radius: var(--radius-md);
 }
 .batch-info {

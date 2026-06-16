@@ -25,8 +25,9 @@ import (
 
 // POP3Fetcher POP3 邮件拉取器 - 从 POP3 服务器拉取并解析存储邮件
 type POP3Fetcher struct {
-	db     *gorm.DB
-	config *config.Config
+	db            *gorm.DB
+	config        *config.Config
+	SyncedMailIDs []uint // 本次同步成功入库的邮件ID列表（精确追踪，用于webhook）
 }
 
 // NewPOP3Fetcher 创建 POP3 拉取器实例
@@ -95,6 +96,10 @@ func (f *POP3Fetcher) SyncMailbox(client *POP3Client) (int, error) {
 			continue
 		}
 
+		// ⭐ 记录本次成功入库的邮件ID（用于精确触发 webhook）
+		f.SyncedMailIDs = append(f.SyncedMailIDs, parsed.ID)
+		log.Printf("✅ [POP3] 入库邮件 ID=%d, seq=%d, subject=%q", parsed.ID, seq, parsed.Subject)
+
 		// ⭐ 入库后补全所有附件的 MailID（解析时 mailObj.ID 为 0）
 		for i := range parsed.Attachments {
 			parsed.Attachments[i].MailID = parsed.ID
@@ -109,7 +114,7 @@ func (f *POP3Fetcher) SyncMailbox(client *POP3Client) (int, error) {
 		newCount++
 	}
 
-	log.Printf("📬 POP3 同步完成 %s: 新增/更新 %d 封邮件", client.Account.Email, newCount)
+	log.Printf("📬 POP3 同步完成 %s: 新增/更新 %d 封邮件, IDs=%v", client.Account.Email, newCount, f.SyncedMailIDs)
 	return newCount, nil
 }
 

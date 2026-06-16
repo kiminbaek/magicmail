@@ -212,8 +212,8 @@
                   </div>
                   <div class="form-field" style="grid-column: 1 / -1;">
                     <label>自定义 Body（JSON 模板）</label>
-                    <textarea v-model="form.body" rows="3" placeholder='{"title":"📧 {{data.subject}}","content":"**来自:** {{data.from}}\n**时间:** {{data.sent_at}}\n\n{{data.preview}}","type":"markdown"}' ></textarea>
-                    <small class="field-hint">可选，留空则使用默认结构。支持模板变量：&#123;{event}}、&#123;{timestamp}}、&#123;{data.xxx}}</small>
+                    <textarea v-model="form.body" rows="3" placeholder='{"title":"📧 {{data.subject}}","content":"**来自:** {{data.from}}\n**时间:** {{data.sent_at}}\n\n{{data.text_body}}","type":"markdown"}' ></textarea>
+                    <small class="field-hint">可选，留空则使用默认结构。变量：&#123;{event}}、&#123;{timestamp}}、&#123;{data.subject}}、&#123;{data.text_body}}、&#123;{data.html_body}}、&#123;{data.preview}} 等</small>
                   </div>
                 </div>
               </div>

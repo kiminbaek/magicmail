@@ -417,11 +417,39 @@ func formatSize(size int64) string {
 }
 
 // stripHTML 移除 HTML 标签，返回纯文本
+// 会完整移除 <style> 和 <script> 标签及其内部内容，避免 CSS/JS 代码泄漏
 func stripHTML(html string) string {
-	// 简单实现：移除 <...> 标签
+	s := html
+
+	// 1. 先移除 <style>...</style> 和 <script>...</script> 块（大小写不敏感）
+	for _, tag := range []string{"style", "script"} {
+		for {
+			lower := strings.ToLower(s)
+			startTag := "<" + tag
+			endTag := "</" + tag + ">"
+
+			startIdx := strings.Index(lower, startTag)
+			if startIdx == -1 {
+				break
+			}
+			startClose := strings.Index(s[startIdx:], ">")
+			if startClose == -1 {
+				break
+			}
+			contentStart := startIdx + startClose + 1
+			endIdx := strings.Index(strings.ToLower(s[contentStart:]), endTag)
+			if endIdx == -1 {
+				s = s[:startIdx]
+				break
+			}
+			s = s[:startIdx] + s[contentStart+endIdx+len(endTag):]
+		}
+	}
+
+	// 2. 移除剩余 HTML 标签
 	var result strings.Builder
 	inTag := false
-	for _, r := range html {
+	for _, r := range s {
 		if r == '<' {
 			inTag = true
 			continue
@@ -434,7 +462,23 @@ func stripHTML(html string) string {
 			result.WriteRune(r)
 		}
 	}
-	return strings.TrimSpace(result.String())
+
+	// 3. 清理多余空白
+	raw := result.String()
+	var cleaned strings.Builder
+	prevSpace := false
+	for _, r := range raw {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			if !prevSpace {
+				cleaned.WriteRune(' ')
+				prevSpace = true
+			}
+		} else {
+			cleaned.WriteRune(r)
+			prevSpace = false
+		}
+	}
+	return strings.TrimSpace(cleaned.String())
 }
 
 // SendMail 发送邮件
