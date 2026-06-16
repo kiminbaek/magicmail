@@ -8,9 +8,9 @@ maintainer            = magiccode1412
 maintainer_url        = https://github.com/magiccode1412/magicmail
 desktop_uidir         = ui
 desktop_applaunchname = magicmail.Application
-changelog             = '''
+changelog             = """
 1. 完善移动端下布局错位问题
 2. 完善webhook推送逻辑和模板变量
 3. 修复未读计数器更新不及时不同步问题
-'''
+"""
 
