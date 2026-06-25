@@ -103,11 +103,24 @@ func NewMailClient(account *models.MailAccount, cfg *config.Config) (MailClient,
 	}
 }
 
-// Authenticate 使用 LOGIN 命令认证
+// Authenticate 使用 LOGIN 命令认证，并发送客户端ID信息（解决163邮箱 Unsafe Login问题）
 func (c *IMAPClient) Authenticate() error {
 	if c.Account.Password == "" {
 		return fmt.Errorf("密码为空，无法认证")
 	}
+
+	// 发送 ID 命令声明客户端身份（RFC 2971）
+	// 163/126等网易邮箱要求客户端必须发送ID命令，否则会返回 "SELECT Unsafe Login" 错误
+	idData := &imap.IDData{
+		Name:    "MagicMail",
+		Version: "1.0.0",
+		Vendor:  "MagicCode",
+	}
+	if _, err := c.Client.ID(idData).Wait(); err != nil {
+		// ID 命令失败不阻塞登录（部分服务器可能不支持），仅记录日志
+		log.Printf("⚠️  发送 IMAP ID 命令失败 (可能服务器不支持): %v", err)
+	}
+
 	if err := c.Client.Login(c.Account.Username, c.Account.Password).Wait(); err != nil {
 		return fmt.Errorf("IMAP 登录失败 (%s@%s): %w", c.Account.Username, c.Account.Email, err)
 	}
