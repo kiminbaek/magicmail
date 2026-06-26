@@ -42,6 +42,7 @@ func Register(app *fiber.App, db *gorm.DB) {
 	attachmentService := services.NewAttachmentService(db)
 	webhookService := services.NewWebhookService(db)
 	authService := services.NewAuthService(db, cfg)
+	healthCheckService := services.NewHealthCheckService(db) // 健康检查服务
 
 	// 初始化 VAPID 密钥 + PushService（首次自动生成 ECDSA P-256 密钥对）
 	pushPriv, pushPub, _ := EnsureVAPIDKeys(db)
@@ -56,7 +57,7 @@ func Register(app *fiber.App, db *gorm.DB) {
 	}
 
 	// --- 初始化 Handler 层 ---
-	accountHandler := handlers.NewAccountHandler(accountService)
+	accountHandler := handlers.NewAccountHandler(accountService, healthCheckService)
 	mailHandler := handlers.NewMailHandler(mailService)
 	attachmentHandler := handlers.NewAttachmentHandler(attachmentService)
 	webhookHandler := handlers.NewWebhookHandler(webhookService)
@@ -92,6 +93,7 @@ func Register(app *fiber.App, db *gorm.DB) {
 	accounts.Post("/test-connection", accountHandler.TestConnection)
 	accounts.Post("/:id/sync", accountHandler.TriggerSync)
 	accounts.Put("/:id/status", accountHandler.ToggleStatus)
+	accounts.Get("/health", accountHandler.HealthCheck) // 健康检查端点
 
 	mails := protected.Group("/mails")
 

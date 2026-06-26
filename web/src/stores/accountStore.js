@@ -37,6 +37,7 @@ export const useAccountStore = defineStore('account', () => {
     } catch (e) {
       error.value = e.message
       console.error('[accountStore] 获取邮箱列表失败:', e.message)
+      // 失败时保留旧数据，不清空 accounts
     } finally {
       loading.value = false
     }

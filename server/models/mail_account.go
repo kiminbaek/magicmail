@@ -4,7 +4,7 @@
 package models
 
 import (
-	"fmt"
+	"log"
 	"time"
 
 	"magicmail/crypto"
@@ -71,7 +71,9 @@ func (a *MailAccount) AfterFind(tx *gorm.DB) error {
 	if a.Password != "" {
 		decrypted, err := crypto.Decrypt(a.Password)
 		if err != nil {
-			return fmt.Errorf("密码解密失败: %w", err)
+			log.Printf("[WARN] MailAccount#%d 密码解密失败: %v", a.ID, err)
+			a.Password = "" // 标记为空，但不阻断查询
+			return nil
 		}
 		a.Password = decrypted
 	}
@@ -167,6 +169,41 @@ type AccountResponse struct {
 	UnreadCount  int64       `json:"unread_count"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
+}
+
+// AccountListDTO 列表查询专用 DTO（不含 Password 字段，避免触发 AfterFind 解密）
+// 用于列表场景：只需展示基本信息，不需要密码明文
+type AccountListDTO struct {
+	ID             uint       `gorm:"primaryKey" json:"id"`
+	Name           string     `json:"name"`
+	Email          string     `json:"email"`
+	Protocol       string     `json:"protocol"`
+	ImapHost       string     `gorm:"column:imap_host" json:"host"`
+	Port           int        `json:"port"`
+	SmtpHost       string     `gorm:"column:smtp_host" json:"smtp_host,omitempty"`
+	SmtpPort       int        `gorm:"column:smtp_port" json:"smtp_port,omitempty"`
+	Username       string     `json:"username"`
+	PasswordRaw    string     `gorm:"column:password" json:"-"` // 接收原始密码密文，不对外暴露
+	ProxyEnabled   bool       `gorm:"column:proxy_enabled" json:"proxy_enabled"`
+	ProxyURL       string     `gorm:"column:proxy_url" json:"proxy_url,omitempty"`
+	SyncMode       string     `gorm:"column:sync_mode" json:"sync_mode"`
+	SyncDays       int        `gorm:"column:sync_days" json:"sync_days"`
+	DeleteOnServer bool        `gorm:"column:delete_on_server" json:"delete_on_server"`
+	LastSyncAt     *time.Time `gorm:"column:last_sync_at" json:"last_sync_at"`
+	Status         string     `gorm:"column:status" json:"status"`
+	ErrorMsg       string     `gorm:"column:error_msg" json:"error_msg,omitempty"`
+	CreatedAt      time.Time  `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at" json:"updated_at"`
+}
+
+// HasPassword 判断是否设置了密码（PasswordRaw 非空即有密码）
+func (dto *AccountListDTO) HasPassword() bool {
+	return dto.PasswordRaw != ""
+}
+
+// TableName 指定 DTO 的表名（与 MailAccount 共享同一张表）
+func (AccountListDTO) TableName() string {
+	return "mail_accounts"
 }
 
 // DefaultPort 根据协议返回默认端口

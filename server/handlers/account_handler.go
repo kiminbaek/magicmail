@@ -7,18 +7,24 @@ import (
 	"magicmail/services"
 	"magicmail/models"
 	"strconv"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 // AccountHandler 邮箱账号 API 处理器
 type AccountHandler struct {
-	service *services.AccountService
+	service           *services.AccountService
+	healthCheckService *services.HealthCheckService
 }
 
 // NewAccountHandler 创建邮箱 Handler 实例
-func NewAccountHandler(svc *services.AccountService) *AccountHandler {
-	return &AccountHandler{service: svc}
+func NewAccountHandler(svc *services.AccountService, healthSvc ...*services.HealthCheckService) *AccountHandler {
+	h := &AccountHandler{service: svc}
+	if len(healthSvc) > 0 && healthSvc[0] != nil {
+		h.healthCheckService = healthSvc[0]
+	}
+	return h
 }
 
 // List 获取邮箱列表
@@ -250,4 +256,33 @@ func (h *AccountHandler) ToggleStatus(c *fiber.Ctx) error {
 		"success": true,
 		"message": actionMsg,
 	})
+}
+
+// HealthCheck 检查所有账号的健康状态
+// @Summary 账号健康检查
+// @Tags 邮箱管理
+// @Produce json
+// @Param details query bool false "是否包含详细信息（默认只返回不健康的账号）"
+// @Success 200 {object} services.HealthCheckSummary
+// @Router /api/v1/accounts/health [get]
+func (h *AccountHandler) HealthCheck(c *fiber.Ctx) error {
+	if h.healthCheckService == nil {
+		return c.Status(503).JSON(fiber.Map{
+			"error": "健康检查服务未启用",
+		})
+	}
+
+	details := c.Query("details", "false") == "true"
+
+	summary, err := h.healthCheckService.CheckAllAccounts(details)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error":  "健康检查失败",
+			"detail": err.Error(),
+		})
+	}
+
+	summary.CheckedAt = time.Now().Format(time.RFC3339)
+
+	return c.JSON(summary)
 }

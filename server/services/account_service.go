@@ -24,8 +24,9 @@ func NewAccountService(db *gorm.DB, cfg *config.Config) *AccountService {
 }
 
 // List 获取所有邮箱账号列表（分页）
+// 使用 AccountListDTO 避免 AfterFind 钩子触发密码解密，提升列表查询性能和容错性
 func (s *AccountService) List(page, pageSize int) ([]models.AccountResponse, int64, error) {
-	var accounts []models.MailAccount
+	var dtos []models.AccountListDTO
 	var total int64
 
 	if page < 1 {
@@ -40,13 +41,26 @@ func (s *AccountService) List(page, pageSize int) ([]models.AccountResponse, int
 	query := s.db.Model(&models.MailAccount{}).Order("created_at DESC")
 	query.Count(&total)
 
-	if err := query.Offset(offset).Limit(pageSize).Find(&accounts).Error; err != nil {
+	// 使用 Select 明确指定字段 + Scan 绕过 MailAccount 的 AfterFind 钩子
+	// password 字段仅用于判断是否为空（has_password），不进行解密
+	selectFields := []string{
+		"id", "name", "email", "protocol", "imap_host", "port",
+		"smtp_host", "smtp_port", "username",
+		"password", // 仅检查是否为空，不解密
+		"proxy_enabled", "proxy_url", "sync_mode", "sync_days",
+		"delete_on_server", "last_sync_at", "status", "error_msg",
+		"created_at", "updated_at",
+	}
+
+	if err := query.Offset(offset).Limit(pageSize).
+		Select(selectFields).
+		Scan(&dtos).Error; err != nil { // Scan 不触发 GORM 钩子
 		return nil, 0, err
 	}
 
-	responses := make([]models.AccountResponse, len(accounts))
-	for i, acc := range accounts {
-		responses[i] = s.toResponse(acc)
+	responses := make([]models.AccountResponse, len(dtos))
+	for i, dto := range dtos {
+		responses[i] = s.dtoToResponse(dto)
 	}
 
 	return responses, total, nil
@@ -240,6 +254,32 @@ func (s *AccountService) TriggerSync(id uint) error {
 
 	go pool.RestartWorker(&account)
 	return nil
+}
+
+// dtoToResponse 将 AccountListDTO 转换为 API 响应格式
+func (s *AccountService) dtoToResponse(dto models.AccountListDTO) models.AccountResponse {
+	return models.AccountResponse{
+		ID:             dto.ID,
+		Name:           dto.Name,
+		Email:          dto.Email,
+		Protocol:       dto.Protocol,
+		ImapHost:       dto.ImapHost,
+		Port:           dto.Port,
+		SmtpHost:       dto.SmtpHost,
+		SmtpPort:       dto.SmtpPort,
+		Username:       dto.Username,
+		HasPassword:    dto.HasPassword(),
+		ProxyEnabled:   dto.ProxyEnabled,
+		ProxyURL:       dto.ProxyURL,
+		SyncMode:       dto.SyncMode,
+		SyncDays:       dto.SyncDays,
+		DeleteOnServer: dto.DeleteOnServer,
+		LastSyncAt:     dto.LastSyncAt,
+		Status:         dto.Status,
+		ErrorMsg:       dto.ErrorMsg,
+		CreatedAt:      dto.CreatedAt,
+		UpdatedAt:      dto.UpdatedAt,
+	}
 }
 
 // toResponse 将模型转换为 API 响应格式（脱敏）
