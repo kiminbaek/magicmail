@@ -1,16 +1,18 @@
 appname               = magicmail
 version               = 1.1.1
 display_name          = 魔法邮箱
-desc                  = """魔法邮箱 - 基于 IMAP 协议的统一邮件管理平台，一站式收取、管理多个邮箱。支持 IMAP IDLE 实时推送、PWA 客户端、Webhook 通知、多账号管理、邮件去重等功能。
-<a href="https://github.com/magiccode1412/magicmail" target="_blank">GitHub</a>
-<a href="https://www.160621.xyz/magicmail" target="_blank">文档</a>
-<a href="https://qm.qq.com/q/wWS78gByRa" target="_blank">点此加入QQ群：314514507</a>
-<a href="https://pd.qq.com/s/eveskv89x" target="_blank">点此加入QQ频道</a>
+desc                  = """魔法邮箱 - 基于 IMAP 协议的统一邮件管理平台，一站式收取、管理多个邮箱。支持 IMAP 实时推送、PWA 客户端、Webhook 通知、多账号管理、邮件去重等功能。
+
+本应用为飞牛 fnOS 适配版，基于 magiccode1412/magicmail 二次开发，新增 QQ 邮件通知功能（通过 QwenPaw API 自动推送新邮件到 QQ）。
+
+<a href="https://github.com/kiminbaek/magicmail" target="_blank">GitHub (kiminbaek)</a>
+<a href="https://github.com/magiccode1412/magicmail" target="_blank">原作者 GitHub</a>
+<a href="https://www.160621.xyz/magicmail" target="_blank">使用文档</a>
 """
 platform              = x86
 source                = thirdparty
-maintainer            = 魔法代码
-maintainer_url        = https://github.com/magiccode1412/magicmail
+maintainer            = kiminbaek
+maintainer_url        = https://github.com/kiminbaek/magicmail
 desktop_uidir         = ui
 desktop_applaunchname = magicmail.Application
 changelog             = """1. 新增 QQ 邮件通知功能（通过 QwenPaw API 自动推送新邮件到 QQ）

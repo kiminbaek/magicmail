@@ -2,11 +2,13 @@
 
 <img src="./public/images/icon_512.png" alt="logo" width="128" height="128">
 
-# Magicmail - 魔法邮箱
+# Magicmail - 魔法邮箱（飞牛 fnOS 适配版）
 
 一套完整的邮件代收系统，基于 **Go (Fiber + GORM + SQLite)** 后端 + **Vue3 PWA** 前端。通过 IMAP 协议代理收取多个邮箱账号的邮件，统一存储至本地数据库，以现代化 PWA 客户端呈现。
 
-[使用文档](https://160621.xyz/magicmail) | [GitHub](https://github.com/magiccode1412/magicmail) | [API 文档](https://160621.xyz/magicmail/api/overview) | [功能特性](https://160621.xyz/magicmail/guide/features) | [安装部署](https://160621.xyz/magicmail/guide/installation)
+本项目基于 [magiccode1412/magicmail](https://github.com/magiccode1412/magicmail) 二次开发，主要适配飞牛 fnOS 平台，并新增了 QQ 邮件通知功能。
+
+[使用文档](https://160621.xyz/magicmail) | [GitHub (kiminbaek)](https://github.com/kiminbaek/magicmail) | [原作者 GitHub](https://github.com/magiccode1412/magicmail) | [API 文档](https://160621.xyz/magicmail/api/overview) | [功能特性](https://160621.xyz/magicmail/guide/features)
 
 </div>
 
@@ -86,8 +88,16 @@ docker compose -f docker-compose.prebuilt.yml up -d
 
 ## License
 
-Copyright (C) 2026 [magiccode (魔法代码)](https://github.com/magiccode1412/magicmail)
+**原作者版权：** Copyright (C) 2026 [magiccode (魔法代码)](https://github.com/magiccode1412/magicmail)
+
+**二次开发版权：** Copyright (C) 2026 [kiminbaek](https://github.com/kiminbaek/magicmail)
 
 本程序基于 **AGPLv3** 开源协议发布，网络使用需提供源代码获取方式。
+
+本适配版新增功能：
+- ✅ 飞牛 fnOS 平台适配（fpk 打包格式）
+- ✅ QQ 邮件通知功能（通过 QwenPaw API 自动推送新邮件到 QQ）
+- ✅ IMAP 同步卡死问题修复
+- ✅ 附件目录路径修复
 
 [查看完整协议文本 →](./LICENSE)

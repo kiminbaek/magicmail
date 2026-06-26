@@ -2,6 +2,7 @@
                        Version 3, 19 November 2007
 
  Copyright (C) 2026  magiccode (魔法代码)
+ Copyright (C) 2026  kiminbaek (飞牛 fnOS 适配版)
 
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU Affero General Public License as
@@ -18,6 +19,15 @@
 
  Everyone is permitted to copy and distribute verbatim copies
  of this license document, but changing it is not allowed.
+
+---
+
+关于飞牛 fnOS 适配版：
+本适配版基于 magiccode1412/magicmail 二次开发，在保留原有功能的基础上：
+- 适配飞牛 fnOS 平台（fpk 打包格式）
+- 新增 QQ 邮件通知功能（通过 QwenPaw API 自动推送新邮件到 QQ）
+- 修复 IMAP 同步卡死问题
+- 修复附件目录路径问题
 
                             Preamble
 
