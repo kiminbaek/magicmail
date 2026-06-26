@@ -339,7 +339,7 @@ function formatTime(dateStr) {
   padding: 60px 20px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   .account-item {
     grid-template-columns: 1fr auto;
     padding: var(--space-md);
