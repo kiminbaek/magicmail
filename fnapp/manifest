@@ -1,5 +1,5 @@
 appname               = magicmail
-version               = 1.1.0
+version               = 1.1.1
 display_name          = 魔法邮箱
 desc                  = """魔法邮箱 - 基于 IMAP 协议的统一邮件管理平台，一站式收取、管理多个邮箱。支持 IMAP IDLE 实时推送、PWA 客户端、Webhook 通知、多账号管理、邮件去重等功能。
 <a href="https://github.com/magiccode1412/magicmail" target="_blank">GitHub</a>
@@ -14,8 +14,11 @@ maintainer_url        = https://github.com/magiccode1412/magicmail
 desktop_uidir         = ui
 desktop_applaunchname = magicmail.Application
 changelog             = """1. 新增 QQ 邮件通知功能（通过 QwenPaw API 自动推送新邮件到 QQ）
-2. 完善移动端下布局错位问题
-3. 完善webhook推送逻辑和模板变量
-4. 修复未读计数器更新不及时不同步问题
+2. 修复 IMAP 同步卡死问题：重构 syncMailbox 为两阶段 FETCH，消除命令 pipeline 冲突
+3. 修复 fetchBody 在连接断开后永久阻塞：增加 60 秒超时保护
+4. 修复附件目录创建失败：使用 DSN 路径替代相对路径
+5. 完善移动端下布局错位问题
+6. 完善webhook推送逻辑和模板变量
+7. 修复未读计数器更新不及时不同步问题
 """
 

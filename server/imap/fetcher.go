@@ -86,7 +86,6 @@ func (f *Fetcher) syncMailbox(client *IMAPClient, mailboxName, folder string) (i
 	}
 
 	fetchCmd := client.Client.Fetch(seqSet, fetchOptions)
-	defer fetchCmd.Close()
 
 	newCount := 0
 	syncMode := client.Account.SyncMode
@@ -99,27 +98,40 @@ func (f *Fetcher) syncMailbox(client *IMAPClient, mailboxName, folder string) (i
 	log.Printf("📬 开始同步 %s: 模式=%s, 天数=%d, 收件箱共 %d 封邮件",
 		client.Account.Email, syncMode, syncDays, mbox.NumMessages)
 
+	// ⭐ 第一阶段：拉取所有信封数据（不在此阶段调 fetchBody，避免 IMAP 命令 pipeline 冲突）
+	// 原因：同一连接上信封 FETCH 进行中时发第二个 FETCH，163 等服务器不支持 pipeline 会不响应
+	var envelopes []*imapclient.FetchMessageBuffer
 	for {
 		msg := fetchCmd.Next()
 		if msg == nil {
 			break
 		}
-
-		// 使用 Collect() 获取完整消息数据（包含 Flags、InternalDate 等字段）
 		buf, err := msg.Collect()
 		if err != nil {
 			log.Printf("⚠️  收集消息数据失败: %v", err)
 			continue
 		}
-
-	// 根据 SyncMode 判断是否需要同步这封邮件
-	if !shouldSync(buf, syncMode, cutoffTime) {
-		continue
+		envelopes = append(envelopes, buf)
 	}
+	fetchCmd.Close() // 显式关闭信封 FETCH，确保命令完成后再发下一个 FETCH
+
+	log.Printf("📬 信封拉取完成 %s: 共 %d 封，开始拉取正文", client.Account.Email, len(envelopes))
+
+	// ⭐ 第二阶段：逐个拉取邮件正文（在信封 FETCH Close 后执行，避免命令冲突）
+	for _, buf := range envelopes {
+		// 根据 SyncMode 判断是否需要同步这封邮件
+		if !shouldSync(buf, syncMode, cutoffTime) {
+			continue
+		}
 
 		parsed, _, err := f.parseMessage(client, buf)
 		if err != nil {
 			log.Printf("⚠️  解析邮件失败 (UID=%d): %v", buf.UID, err)
+			// 连接超时说明 IMAP 连接已废，提前终止同步避免每封等 60 秒
+			if strings.Contains(err.Error(), "连接已断开") {
+				log.Printf("🔌 IMAP 连接已断开，终止本次同步 %s", client.Account.Email)
+				return newCount, err
+			}
 			continue
 		}
 		if parsed == nil {
@@ -282,8 +294,29 @@ func (f *Fetcher) fetchBody(client *IMAPClient, uid imap.UID, mailID uint) (*Bod
 	fetchCmd := client.Client.Fetch(uidSet, fetchOptions)
 	defer fetchCmd.Close()
 
-	// 使用 Collect 获取结果
-	msgs, err := fetchCmd.Collect()
+	// 使用 Collect 获取结果（带 60 秒超时保护，防止连接断开后永久卡死）
+	// 背景：go-imap/v2 beta.4 在连接被服务端断开后，Collect() 不返回错误也不超时，
+	// goroutine 永久卡在 channel 等待。此处用 goroutine + select 兜底。
+	type collectResult struct {
+		msgs []*imapclient.FetchMessageBuffer
+		err  error
+	}
+	ch := make(chan collectResult, 1)
+	go func() {
+		m, e := fetchCmd.Collect()
+		ch <- collectResult{m, e}
+	}()
+
+	var msgs []*imapclient.FetchMessageBuffer
+	var err error
+	select {
+	case r := <-ch:
+		msgs, err = r.msgs, r.err
+	case <-time.After(60 * time.Second):
+		log.Printf("⚠️  拉取邮件正文超时 (UID=%d)，IMAP 连接可能已断开", uid)
+		fetchCmd.Close()
+		return nil, fmt.Errorf("拉取邮件正文超时 (UID=%d)，连接已断开", uid)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("获取邮件体失败: %w", err)
 	}
@@ -332,9 +365,17 @@ func (f *Fetcher) fetchBody(client *IMAPClient, uid imap.UID, mailID uint) (*Bod
 	}
 
 	// 准备附件存储目录（仅当 mailID 可用时）
+	// 使用 DSN 同级目录下的 attachments 子目录，而非相对路径（避免工作目录不对导致权限错误）
 	var baseDir string
 	if mailID > 0 {
-		baseDir = filepath.Join(".", "data", "attachments")
+		dsnDir := filepath.Dir(f.config.Database.DSN)
+		if !filepath.IsAbs(dsnDir) {
+			absDir, err := filepath.Abs(dsnDir)
+			if err == nil {
+				dsnDir = absDir
+			}
+		}
+		baseDir = filepath.Join(dsnDir, "attachments")
 		if err := os.MkdirAll(baseDir, 0755); err != nil {
 			log.Printf("⚠️  创建附件目录失败: %v", err)
 			baseDir = ""
