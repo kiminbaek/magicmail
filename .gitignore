@@ -63,3 +63,4 @@ Thumbs.db
 
 /fnapp/app/server/*
 /fnapp/*.fpk
+/*.fpk

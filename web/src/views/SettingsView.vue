@@ -297,6 +297,9 @@
         </div>
       </section>
 
+      <!-- QQ 邮件通知 -->
+      <QQNotificationSettings />
+
       <!-- 关于信息 -->
       <section class="settings-section card">
         <h3 class="section-title">关于</h3>
@@ -381,6 +384,7 @@ import { useToast } from '@/composables/useToast'
 import { useUpdateCheck } from '@/composables/useUpdateCheck'
 import { useWebPush } from '@/composables/useWebPush'
 import * as webhookApi from '@/api/webhook'
+import QQNotificationSettings from '@/components/QQNotificationSettings.vue'
 
 const toast = useToast()
 const appStore = useAppStore()

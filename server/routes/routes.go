@@ -51,6 +51,10 @@ func Register(app *fiber.App, db *gorm.DB) {
 	services.InitGlobalPush(pushService) // 注册全局单例供外部调用
 	notifier.RegisterPushNotifier(services.SendPushNotification) // 注册推送回调供 Worker 调用
 
+	// QQ 邮件通知服务（注册回调到 notifier，由 TriggerByEvent 内部调用）
+	qqNotificationService := services.NewQQNotificationService(db)
+	notifier.RegisterQQNotifier(qqNotificationService.HandleNotification)
+
 	// 开发环境自动创建默认管理员账号（仅在无用户时生效）
 	if isDevMode() {
 		authService.SeedDefaultUser("admin", "admin123")
@@ -61,6 +65,7 @@ func Register(app *fiber.App, db *gorm.DB) {
 	mailHandler := handlers.NewMailHandler(mailService)
 	attachmentHandler := handlers.NewAttachmentHandler(attachmentService)
 	webhookHandler := handlers.NewWebhookHandler(webhookService)
+	qqNotificationHandler := handlers.NewQQNotificationHandler(qqNotificationService)
 	authHandler := handlers.NewAuthHandler(authService)
 	draftHandler := handlers.NewDraftHandler(services.NewDraftService(db))
 	pushHandler := handlers.NewPushHandler(pushService)
@@ -146,6 +151,16 @@ func Register(app *fiber.App, db *gorm.DB) {
 	webhooks.Delete("/:id", webhookHandler.Delete)
 	webhooks.Post("/:id/test", webhookHandler.Test)
 	webhooks.Get("/:id/logs", webhookHandler.GetLogs)
+
+	// ============================================================
+	//  QQ 邮件通知 API
+	// ============================================================
+	qqNotify := protected.Group("/qq-notification")
+	qqNotify.Get("/config", qqNotificationHandler.GetConfig)
+	qqNotify.Post("/config", qqNotificationHandler.SaveConfig)
+	qqNotify.Post("/test", qqNotificationHandler.Test)
+	qqNotify.Get("/logs", qqNotificationHandler.GetLogs)
+	qqNotify.Delete("/logs/:id", qqNotificationHandler.DeleteLog)
 
 	// ============================================================
 	//  Web Push 推送 API

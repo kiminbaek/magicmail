@@ -82,6 +82,11 @@ func TriggerByEvent(db *gorm.DB, event string, data map[string]interface{}) {
 		}())
 		}(h)
 	}
+
+	// QQ 邮件通知（异步，不阻塞同步流程）
+	if event == "mail.received" {
+		SendQQNotification(event, data)
+	}
 }
 
 // matchEvent 检查事件是否匹配
@@ -248,4 +253,21 @@ func SendPushNotification(userID uint, title, body string, data any) {
 	}
 	pushNotifier(userID, title, body, data)
 	log.Printf("[Push-Bridge] ✓ pushNotifier 已调用完成")
+}
+
+// --- QQ 通知桥接（避免循环依赖，同 pushNotifier 模式）---
+
+var qqNotifier func(event string, data map[string]interface{})
+
+// RegisterQQNotifier 注册 QQ 通知回调（由 routes.Register 调用）
+func RegisterQQNotifier(fn func(event string, data map[string]interface{})) {
+	qqNotifier = fn
+}
+
+// SendQQNotification 触发 QQ 通知（由 TriggerByEvent 内部调用）
+func SendQQNotification(event string, data map[string]interface{}) {
+	if qqNotifier == nil {
+		return
+	}
+	go qqNotifier(event, data)
 }

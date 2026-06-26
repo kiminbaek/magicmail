@@ -61,6 +61,8 @@ func Init(dsn string) *gorm.DB {
 		&models.AppConfig{},
 		&models.Draft{},
 		&models.PushSubscription{},
+		&models.QQNotification{},
+		&models.QQNotificationLog{},
 	); err != nil {
 		log.Fatalf("❌ 数据库迁移失败: %v", err)
 	}
