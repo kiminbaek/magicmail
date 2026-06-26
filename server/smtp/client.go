@@ -220,10 +220,31 @@ func sendViaTLSWithDialer(addr, from string, to []string, msg []byte, auth smtp.
 	return nil
 }
 
+// sanitizeHeaderValue 清洗邮件头字段值，移除可能导致 CRLF 注入的控制字符
+// 防止攻击者通过 \r\n 注入额外的 SMTP 头部（CWE-93）
+func sanitizeHeaderValue(value string) string {
+	// 移除 \r (回车)、\n (换行)、空字节等控制字符
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	value = strings.ReplaceAll(value, "\x00", "")
+	return value
+}
+
+// sanitizeEmailAddr 清洗邮箱地址，移除控制字符并去除首尾空白
+func sanitizeEmailAddr(addr string) string {
+	addr = sanitizeHeaderValue(addr)
+	addr = strings.TrimSpace(addr)
+	return addr
+}
+
 // buildMessage 构建 RFC822 格式的原始邮件内容
 func buildMessage(from string, to, cc, bcc []string, subject, textBody, htmlBody string) []byte {
 	var sb strings.Builder
 	now := time.Now().Format("Mon, 02 Jan 2006 15:04:05 -0700") // RFC1123 格式
+
+	// 清洗所有用户输入，防止 CRLF 注入
+	from = sanitizeEmailAddr(from)
+	subject = sanitizeHeaderValue(subject)
 
 	// --- 头部 ---
 	sb.WriteString(fmt.Sprintf("From: %s\r\n", from))
@@ -233,7 +254,7 @@ func buildMessage(from string, to, cc, bcc []string, subject, textBody, htmlBody
 		if i > 0 {
 			sb.WriteString(", ")
 		}
-		sb.WriteString(addr)
+		sb.WriteString(sanitizeEmailAddr(addr))
 	}
 	sb.WriteString("\r\n")
 
@@ -243,7 +264,7 @@ func buildMessage(from string, to, cc, bcc []string, subject, textBody, htmlBody
 			if i > 0 {
 				sb.WriteString(", ")
 			}
-			sb.WriteString(addr)
+			sb.WriteString(sanitizeEmailAddr(addr))
 		}
 		sb.WriteString("\r\n")
 	}

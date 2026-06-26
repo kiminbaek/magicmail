@@ -12,6 +12,7 @@ import (
 	"magicmail/models"
 	"magicmail/smtp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -279,6 +280,17 @@ func (h *MailHandler) Send(c *fiber.Ctx) error {
 	}
 	if req.Subject == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "请填写邮件主题"})
+	}
+
+	// 安全校验：拒绝包含控制字符的输入（防止 CRLF 注入，CWE-93）
+	allAddrs := append(append(req.To, req.Cc...), req.Bcc...)
+	for _, addr := range allAddrs {
+		if strings.ContainsAny(addr, "\r\n") {
+			return c.Status(400).JSON(fiber.Map{"error": "邮箱地址包含非法字符"})
+		}
+	}
+	if strings.ContainsAny(req.Subject, "\r\n") {
+		return c.Status(400).JSON(fiber.Map{"error": "邮件主题包含非法字符"})
 	}
 
 	result, err := h.service.SendMail(req)
